@@ -3,9 +3,9 @@
 
   # Folio
 
-  ### A quiet place for ideas that need room to become something.
+  ### Your local knowledge store for thinking, writing, and keeping things.
 
-  Local-first documents for text, versions, drawings, images, video, and audio — arranged exactly how you want them.
+  Notes, drafts, references, and media in flexible documents that stay on your machine.
 
   <p>
     <a href="https://github.com/maxlbchung/folio"><img src="https://img.shields.io/github/stars/maxlbchung/folio?style=flat-square&logo=github&label=stars&color=1f5c52" alt="GitHub stars"></a>
@@ -30,32 +30,34 @@
 
 ## The short version
 
-Folio is a small, local-first document editor. It treats a document like a set of pages on a desk: place pages side by side, resize them together, flip between front and back faces, and keep different kinds of work in one cohesive space.
+Folio is a local-first knowledge store and writing workspace. Use it for meeting notes, research, project thinking, personal records, rough drafts, or anything you would normally scatter across Google Docs, Word, notes apps, and folders.
+
+It gives those things one durable home: searchable folios made from text, versions, drawings, images, video, and audio. A folio can be tidy like a finished document or loose like a desk covered in working notes.
 
 Your documents and media stay on your machine. Browser development uses IndexedDB and file pickers; the shipped Windows app uses the native filesystem through Tauri.
 
 ## What makes Folio different
 
-| 01 · Keep it yours | 02 · Compose freely | 03 · Stay in the flow |
+| 01 · Remember more | 02 · Write your way | 03 · Keep ownership |
 | --- | --- | --- |
-| Local documents, local media, local recovery autosaves. | One page, one component — text, versions, drawings, or media. | Search, zoom, themes, fullscreen, undo/redo, and compact controls. |
+| Searchable folios for notes, drafts, references, and media. | One page, one component — text, versions, drawings, or media. | Local files, local media, local recovery autosaves. |
 
-### A document is a canvas, not a form
+### A knowledge store with room to breathe
 
-Every page owns exactly one component. Rows can hold up to four pages, grouped pages share a bottom edge, and the whole composition keeps a constant document width. The result is closer to arranging index cards than filling out a sidebar-heavy editor.
+Folio keeps the familiarity of a document editor while making room for more than a single linear page. Rows can hold up to four pages, pages can sit beside one another, and different kinds of material can live together in the same folio. The result is a personal reference space, not just another blank page.
 
-### Built for unfinished work
+### For the work between documents
 
-Start with an empty folio. Keep a thought as text, put competing drafts into a version page, sketch over a drawing surface, or drop in media when words are not enough. Folio is deliberately comfortable before the work has a name.
+Start with an empty folio. Capture a thought as text, keep competing drafts in a version page, sketch an idea, or save supporting media beside the words. Folio is for the notes before the report, the research around the proposal, and the context that usually gets lost between documents.
 
 ## Features
 
-- **Rich text pages** with emphasis, underline, strikethrough, alignment, and vertical anchoring
+- **Notes and writing** with rich text, emphasis, underline, strikethrough, alignment, and vertical anchoring
 - **Version pages** for comparing drafts, tracking progress, and converting a version to plain text
 - **Vector drawing** with pen, highlighter, eraser, undo, clear, and theme-reactive colors
 - **Media pages** that detect supported image, video, and audio files in one action
 - **Page composition** with pointer-based ordering, side-by-side grouping, and shared row resizing
-- **A local library** for creating, importing, reopening, renaming, deleting, sorting, and searching folios
+- **A personal knowledge library** for creating, importing, reopening, renaming, deleting, sorting, and searching folios
 - **Portable `.folio` archives** with a manifest and separate binary assets
 - **Browser and Windows desktop modes** backed by the same React editor
 
