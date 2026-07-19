@@ -1,0 +1,4 @@
+interface:
+  display_name: "Folio App"
+  short_description: "Build and validate the Folio desktop editor"
+  default_prompt: "Use $folio-app to implement and verify a change to the Folio editor."

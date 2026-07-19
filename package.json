@@ -1,0 +1,39 @@
+{
+  "name": "folio-editor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "check:docs": "node scripts/check-docs.mjs",
+    "check": "npm run check:docs && npm run build && npm run test:archive && node --check scripts/ui-smoke.mjs",
+    "test:archive": "tsx scripts/archive-smoke.ts",
+    "test:ui": "esbuild src/main.tsx --bundle --format=iife --platform=browser --target=chrome120 --jsx=automatic --outfile=dist-smoke/app.js && node scripts/copy-smoke-css.mjs && node scripts/ui-smoke.mjs",
+    "test": "npm run build && npm run test:archive && npm run test:ui",
+    "hooks:install": "node scripts/install-hooks.mjs",
+    "release:desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-desktop.ps1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-fs": "^2.5.1",
+    "jszip": "^3.10.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "esbuild": "^0.28.1",
+    "playwright-core": "^1.61.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.4"
+  }
+}

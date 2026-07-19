@@ -1,0 +1,26 @@
+[package]
+name = "folio"
+version = "0.1.0"
+description = "A compact, local-first document editor"
+authors = ["Folio"]
+edition = "2021"
+
+[lib]
+name = "folio_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# Enables Tauri's bundled asset protocol for production builds. The Tauri CLI
+# passes this feature automatically; declaring it also makes direct Cargo
+# release builds self-contained rather than pointing at the development server.
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
