@@ -1,96 +1,127 @@
-# Folio
+<div align="center">
+  <img src="icon.svg" alt="Folio logo" width="88" height="88">
 
-Folio is a compact, local-first document editor for arranging text, versions, drawings, images, video, and audio in a fixed-width document. It runs in the browser during development and ships as a Windows desktop app through Tauri 2.
+  # Folio
 
-## Product model
+  ### A quiet place for ideas that need room to become something.
 
-- A new folio is empty. Page inputs use ghost text; they do not insert sample content.
-- Every page owns exactly one component. Components are never nested inside another page.
-- Rows may contain one to four pages. Grouped pages split the same document width equally and share one bottom edge.
-- Page handles and component controls stay outside the document width.
-- Text pages stay compact. Version pages open at a minimum height that fits their control rail. Drawing and media pages fill their page and resize through the shared row height without shrinking below their minimum.
-- Documents and media remain local. Native saves overwrite the current file unless Save As is requested.
+  Local-first documents for text, versions, drawings, images, video, and audio — arranged exactly how you want them.
 
-The non-negotiable interaction and layout rules are recorded in [Product invariants](docs/PRODUCT_INVARIANTS.md).
+  <p>
+    <a href="https://github.com/maxlbchung/folio"><img src="https://img.shields.io/github/stars/maxlbchung/folio?style=flat-square&logo=github&label=stars&color=1f5c52" alt="GitHub stars"></a>
+    <a href="https://github.com/maxlbchung/folio/commits/main"><img src="https://img.shields.io/github/last-commit/maxlbchung/folio?style=flat-square&color=1f5c52" alt="Last commit"></a>
+    <img src="https://img.shields.io/badge/React-19-202020?style=flat-square&logo=react&logoColor=61DAFB" alt="React 19">
+    <img src="https://img.shields.io/badge/Tauri-2-202020?style=flat-square&logo=tauri&logoColor=FFC131" alt="Tauri 2">
+    <img src="https://img.shields.io/badge/TypeScript-7-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
+  </p>
+
+  <p>
+    <a href="#quick-start">Get started</a> ·
+    <a href="#what-makes-folio-different">Why Folio</a> ·
+    <a href="#commands">Commands</a>
+  </p>
+</div>
+
+<br>
+
+<div align="center">
+  <img src="folio-preview.png" alt="Folio home library showing a locally stored folio" width="960">
+</div>
+
+## The short version
+
+Folio is a small, local-first document editor. It treats a document like a set of pages on a desk: place pages side by side, resize them together, flip between front and back faces, and keep different kinds of work in one cohesive space.
+
+Your documents and media stay on your machine. Browser development uses IndexedDB and file pickers; the shipped Windows app uses the native filesystem through Tauri.
+
+## What makes Folio different
+
+| 01 · Keep it yours | 02 · Compose freely | 03 · Stay in the flow |
+| --- | --- | --- |
+| Local documents, local media, local recovery autosaves. | One page, one component — text, versions, drawings, or media. | Search, zoom, themes, fullscreen, undo/redo, and compact controls. |
+
+### A document is a canvas, not a form
+
+Every page owns exactly one component. Rows can hold up to four pages, grouped pages share a bottom edge, and the whole composition keeps a constant document width. The result is closer to arranging index cards than filling out a sidebar-heavy editor.
+
+### Built for unfinished work
+
+Start with an empty folio. Keep a thought as text, put competing drafts into a version page, sketch over a drawing surface, or drop in media when words are not enough. Folio is deliberately comfortable before the work has a name.
 
 ## Features
 
-- A local home library for creating, importing, reopening, renaming, and deleting folios
-- Library views by last opened, creation date, last edited, or title, each ascending or descending
-- Lookup across titles and folio text, with title matches first and text-only results ranked by frequency
-- Rich text with Arial/Normal defaults, emphasis, underline, strikethrough, horizontal alignment, and vertical page anchoring
-- Minimal text-version pages with selection, progress, deletion, and conversion to plain text
-- Full-page vector drawing with pen, highlighter, eraser, undo, clear, and theme-reactive colors
-- A single Media action that detects supported image, video, and audio file types
-- Pointer-based page ordering, side-by-side grouping, full-row drop targets, and shared row resizing
-- Page notes, deletion, front/back faces, structural undo/redo, workspace zoom, fullscreen, and light/dark/system themes
-- ZIP-based `.folio` documents with separate binary assets
-- IndexedDB folio catalog and recovery autosave, plus browser/Tauri open/save flows
+- **Rich text pages** with emphasis, underline, strikethrough, alignment, and vertical anchoring
+- **Version pages** for comparing drafts, tracking progress, and converting a version to plain text
+- **Vector drawing** with pen, highlighter, eraser, undo, clear, and theme-reactive colors
+- **Media pages** that detect supported image, video, and audio files in one action
+- **Page composition** with pointer-based ordering, side-by-side grouping, and shared row resizing
+- **A local library** for creating, importing, reopening, renaming, deleting, sorting, and searching folios
+- **Portable `.folio` archives** with a manifest and separate binary assets
+- **Browser and Windows desktop modes** backed by the same React editor
 
 ## Quick start
 
-Requirements: Node.js with npm. Desktop development also requires the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) and Rust.
+### Browser development
+
+Requirements: Node.js with npm.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Vite serves the browser build at the URL printed in the terminal. To run the native shell:
+Vite prints the local development URL in the terminal.
+
+### Windows desktop development
+
+Install the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) and Rust, then run:
 
 ```bash
+npm install
 npm run tauri dev
 ```
 
 ## Commands
 
-| Command | Purpose |
+| Command | What it does |
 | --- | --- |
-| `npm run dev` | Start Vite development mode |
-| `npm run build` | Type-check and create the production web bundle |
-| `npm run check` | Check docs, build, archive round trip, and UI test syntax |
+| `npm run dev` | Start the Vite development server |
+| `npm run build` | Type-check and build the production web bundle |
+| `npm run check` | Run docs, build, archive, and UI syntax checks |
 | `npm run test:archive` | Exercise `.folio` encode/decode with an asset |
 | `npm run test:ui` | Run the Chromium interaction smoke suite |
 | `npm test` | Run build, archive, and live UI smoke coverage |
-| `npm run hooks:install` | Point Git at the tracked `.githooks` directory |
-| `npm run release:desktop` | Validate, build Windows bundles, and refresh portable artifacts |
+| `npm run tauri dev` | Launch the native desktop shell |
+| `npm run release:desktop` | Validate and build Windows release bundles |
 
-The UI smoke suite needs Chromium. Set `CHROMIUM_PATH` if Chromium is not available at the script's default location. See [Testing and release](docs/TESTING_AND_RELEASE.md) for the exact validation matrix and artifact locations.
+The UI smoke suite needs Chromium. Set `CHROMIUM_PATH` when it is not available at the script's default location. The full validation matrix lives in [Testing and release](docs/TESTING_AND_RELEASE.md).
 
-## Architecture at a glance
-
-```text
-Toolbar / PageStack / PageView
-              |
-       DocumentContext
-        /            \
- document state    runtime assets
-        \            /
-       archive + file system
-       browser or Tauri shell
-```
-
-`DocumentContext` is the only mutation boundary for document structure. `pageRows` is the canonical visual arrangement and `pageOrder` is its flattened index. Media bytes live in a runtime asset map and are written beside `manifest.json` inside the `.folio` ZIP container.
-
-Read [Architecture](docs/ARCHITECTURE.md) before changing state flow, page layout, dragging, persistence, or drawing behavior. Read [File format](docs/FILE_FORMAT.md) before changing persisted types or archive code.
-
-## Repository map
+## Under the hood
 
 ```text
-src/components/       Editor UI and page renderers
-src/document/         Persisted types, factories, normalization, state mutations
-src/persistence/      ZIP archive, native/browser file IO, recovery autosave
-src/styles/           Shared application CSS and layout contracts
-src-tauri/            Native Tauri shell, permissions, icons, and bundling
-scripts/              Smoke tests, documentation checks, hooks, and release automation
-docs/                 Architecture, invariants, format, testing, and release notes
-skills/folio-app/      Project-local workflow skill for coding agents
-.githooks/             Tracked Git hooks (installed explicitly)
+                    Toolbar · PageStack · PageView
+                                  │
+                         DocumentContext
+                         ╱             ╲
+                 document state     runtime assets
+                         ╲             ╱
+                    archive + file system
+                    browser or Tauri shell
 ```
+
+`DocumentContext` is the mutation boundary for document structure. `pageRows` is the canonical visual arrangement, while `pageOrder` is its flattened index. Media bytes live in a runtime asset map and are written beside `manifest.json` inside the `.folio` ZIP container.
+
+| Area | Responsibility |
+| --- | --- |
+| `src/components/` | Editor UI and page renderers |
+| `src/document/` | Persisted types, factories, normalization, and mutations |
+| `src/persistence/` | ZIP archive, native/browser file IO, and recovery autosave |
+| `src-tauri/` | Native shell, permissions, icons, and bundling |
+| `scripts/` | Smoke tests, docs checks, hooks, and release automation |
 
 ## `.folio` files
 
-A `.folio` file is a ZIP container with this shape:
+Folio documents are ZIP containers designed to stay legible and portable:
 
 ```text
 manifest.json
@@ -98,21 +129,18 @@ README.txt
 assets/<uuid>.<extension>
 ```
 
-The manifest identifier is `com.folio.document`; the current schema version is `1`. IDs are stable UUIDs within current documents. This project does not require backward compatibility: persisted changes may break old `.folio` files or local database data, and migration work should be added only when explicitly requested.
+Documents are intentionally local-first. Cloud synchronization, collaboration, PDF export, and print layout are outside the current product boundary.
 
-## Desktop artifacts
+## Project notes
 
-A Windows release produces:
+Folio is an evolving desktop editor, not a finished productivity suite. The interaction and layout contracts are documented in [Product invariants](docs/PRODUCT_INVARIANTS.md). Read [Architecture](docs/ARCHITECTURE.md) before changing state flow, page layout, dragging, persistence, or drawing behavior.
 
-- `Folio.exe` and `Folio_0.1.0_windows_x64_portable.zip` at the repository root
-- MSI and NSIS installers below `src-tauri/target/release/bundle/`
+## License
 
-Do not rebuild desktop artifacts for documentation-only changes. For changes that ship in the app, use `npm run release:desktop` so validation, bundles, portable copies, and hashes stay in sync.
+No license has been selected for this repository yet.
 
-## Agent support
+<br>
 
-Future coding agents should start with [AGENTS.md](AGENTS.md) and the local [Folio app skill](skills/folio-app/SKILL.md). Those files route work to the smallest relevant reference and preserve the product's layout and persistence contracts.
-
-## Current boundaries
-
-Collaboration, PDF export, print layout, and cloud synchronization are outside this local-first editor. Text formatting currently uses the browser editing engine; structural undo/redo is separate from native text editing history.
+<div align="center">
+  <sub>Made for the moment before the idea knows what it is.</sub>
+</div>
