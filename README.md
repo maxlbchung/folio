@@ -31,20 +31,6 @@ Inktile is a modular document editor, where you arrange cells with various conte
 
 Inkjet, Inktiles agent-runner, allows you to use your existing coding agent CLIs through the application, exposing them to documentation and MCP tools. This means zero setup on Inktile's side: no API keys, no ports, no MCP wiring.
 
-## What makes Inktile different
-
-| 01 · Remember more | 02 · Write your way | 03 · Keep ownership |
-| --- | --- | --- |
-| Searchable inktiles for notes, drafts, references, and media. | One page, one component — text, versions, drawings, or media. | Local files, local media, local recovery autosaves. |
-
-### A knowledge store with room to breathe
-
-Inktile keeps the familiarity of a document editor while making room for more than a single linear page. Rows can hold up to four pages, pages can sit beside one another, and different kinds of material can live together in the same inktile. The result is a personal reference space, not just another blank page.
-
-### For the work between documents
-
-Start with an empty inktile. Capture a thought as text, keep competing drafts in a version page, sketch an idea, or save supporting media beside the words. Inktile is for the notes before the report, the research around the proposal, and the context that usually gets lost between documents.
-
 ## Features
 
 - **Notes and writing** with rich text, emphasis, underline, strikethrough, alignment, and vertical anchoring
@@ -151,10 +137,6 @@ Documents are intentionally local-first. Cloud synchronization and collaboration
 ## Project notes
 
 Inktile is an evolving desktop editor, not a finished productivity suite. The interaction and layout contracts are documented in [Product invariants](docs/PRODUCT_INVARIANTS.md). Read [Architecture](docs/ARCHITECTURE.md) before changing state flow, page layout, dragging, persistence, or drawing behavior.
-
-## License
-
-No license has been selected for this repository yet.
 
 <br>
 
