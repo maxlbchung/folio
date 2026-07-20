@@ -1,5 +1,5 @@
-// Finds the user's installed Claude Code and Codex CLIs. The broker never
-// installs anything: if a CLI is missing, the backend reports itself
+// Finds the user's installed Claude Code, Codex, and OpenCode CLIs. The broker
+// never installs anything: if a CLI is missing, the backend reports itself
 // unavailable and the panel says so.
 
 import { spawnSync } from "node:child_process";
@@ -99,6 +99,33 @@ export const findCodexCli = () =>
     CODEX_VENDOR_TRIPLES[process.platform] ?? null
   );
 
+/** npm installs (`opencode-ai`) hoist the platform binary as a sibling package
+ * of the launcher script: node_modules/opencode-<os>-<arch>/bin/opencode. */
+const OPENCODE_VENDOR_PACKAGE = {
+  win32: "opencode-windows-x64",
+  darwin: process.arch === "arm64" ? "opencode-darwin-arm64" : "opencode-darwin-x64",
+  linux: process.arch === "arm64" ? "opencode-linux-arm64" : "opencode-linux-x64"
+}[process.platform];
+
+/** @returns {CliLaunch | null} */
+export const findOpencodeCli = () =>
+  findCli(
+    "opencode",
+    "INKTILE_OPENCODE_PATH",
+    [
+      // The official install script drops the binary in ~/.opencode/bin.
+      join(home, ".opencode", "bin", WINDOWS ? "opencode.exe" : "opencode"),
+      join(home, "AppData", "Roaming", "npm", "opencode.cmd"),
+      join(home, ".local", "bin", WINDOWS ? "opencode.exe" : "opencode"),
+      "/usr/local/bin/opencode",
+      "/opt/homebrew/bin/opencode"
+    ],
+    ["opencode-ai", "bin", "opencode"],
+    OPENCODE_VENDOR_PACKAGE
+      ? ["..", "..", OPENCODE_VENDOR_PACKAGE, "bin", WINDOWS ? "opencode.exe" : "opencode"]
+      : null
+  );
+
 export const claudeAvailability = () => {
   const cli = findClaudeCli();
   if (!cli) return { available: false, detail: "The claude CLI was not found. Install Claude Code and log in once." };
@@ -113,4 +140,16 @@ export const codexAvailability = () => {
   const loggedIn = existsSync(join(home, ".codex", "auth.json")) || Boolean(process.env.OPENAI_API_KEY);
   if (!loggedIn) return { available: false, detail: "The codex CLI is installed but no login was found — run codex login once." };
   return { available: true, detail: "Using your existing Codex login." };
+};
+
+export const opencodeAvailability = () => {
+  const cli = findOpencodeCli();
+  if (!cli) return { available: false, detail: "The opencode CLI was not found. Install OpenCode and run opencode auth login once." };
+  // opencode stores provider credentials under its data dir on every platform;
+  // provider API keys in the environment work without a stored login.
+  const dataHome = process.env.XDG_DATA_HOME || join(home, ".local", "share");
+  const loggedIn = existsSync(join(dataHome, "opencode", "auth.json"))
+    || Boolean(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY);
+  if (!loggedIn) return { available: false, detail: "The opencode CLI is installed but no login was found — run opencode auth login once." };
+  return { available: true, detail: "Using your existing OpenCode login." };
 };

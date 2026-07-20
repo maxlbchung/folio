@@ -1,12 +1,14 @@
-// Codex backend: drives the user's installed Codex CLI (`codex exec --json`).
-// MCP registration rides on per-run --config overrides, so nothing is written
-// to ~/.codex/config.toml; the bearer token travels via an env var only.
+// OpenCode backend: drives the user's installed OpenCode CLI
+// (`opencode run --format json`). MCP registration and the built-in tool
+// lockdown ride on a per-run opencode.json in the broker's workspace; the
+// bearer token travels via an env var only, injected into the config through
+// opencode's {env:} substitution so it never touches disk.
 
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { codexAvailability, findCodexCli } from "./cli.mjs";
+import { findOpencodeCli, opencodeAvailability } from "./cli.mjs";
 import { killTree, lineReader, tail, waitForExit } from "./proc.mjs";
 
 const MCP_TOKEN_ENV = "INKTILE_MCP_TOKEN";
@@ -35,76 +37,90 @@ You are editing the one Inktile document the user has open, exclusively through 
 - Do not run commands or touch files; your only workspace is the document, through the tools.
 - While you work, your messages show only as transient status notes — keep them to a short sentence about what you are doing next. Only your final message persists in the chat, so end the turn with a brief summary of what you did. Document content belongs in tool calls, not messages.`;
 
-/** docKey (document id) → Codex thread id, for multi-turn resume. */
-const threads = new Map();
+/** docKey (document id) → OpenCode session id, for multi-turn resume. */
+const sessions = new Map();
 
 /** Whether a resumable conversation exists for this document. */
-export const hasSession = (docKey) => threads.has(docKey);
+export const hasSession = (docKey) => sessions.has(docKey);
 
-/** Model choices surfaced in the panel (current slugs the installed CLI
- * vendors; verified against the binary). "" runs the user's config default. */
+/** OpenCode fans out to whatever providers the user configured, so no model
+ * list is hard-coded here: "" runs the model their opencode config selects. */
 export const models = [
-  { id: "", label: "Default" },
-  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
-  { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
-  { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
-  { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" }
+  { id: "", label: "Default" }
 ];
 
-export const availability = () => ({ ...codexAvailability(), models });
+export const availability = () => ({ ...opencodeAvailability(), models });
 
 /** Forgets the resume state so the next turn starts a fresh conversation. */
 export const clearSession = (docKey) => {
-  threads.delete(docKey);
+  sessions.delete(docKey);
 };
 
-/** Codex reads AGENTS.md from its working directory — the only way to give it
- * standing instructions per run. Rewritten each turn with that turn's read
- * briefing (every turn is its own codex exec process, so this is safe). */
-const ensureWorkspace = (documentState) => {
-  const workspace = join(dirname(fileURLToPath(import.meta.url)), ".codex-workspace");
+/** OpenCode reads AGENTS.md and opencode.json from its working directory:
+ * AGENTS.md carries the per-turn briefing; opencode.json registers the MCP
+ * endpoint (token via {env:} substitution, so only the URL is on disk) and
+ * turns off every built-in tool except web research. Rewritten each turn
+ * (every turn is its own opencode run process, so this is safe). */
+const ensureWorkspace = (documentState, mcpUrl) => {
+  const workspace = join(dirname(fileURLToPath(import.meta.url)), ".opencode-workspace");
   mkdirSync(workspace, { recursive: true });
   writeFileSync(join(workspace, "AGENTS.md"), buildInstructions(documentState), "utf8");
+  writeFileSync(join(workspace, "opencode.json"), JSON.stringify({
+    mcp: {
+      inktile: {
+        type: "remote",
+        url: mcpUrl,
+        enabled: true,
+        headers: { Authorization: `Bearer {env:${MCP_TOKEN_ENV}}` }
+      }
+    },
+    tools: {
+      bash: false,
+      edit: false,
+      write: false,
+      read: false,
+      glob: false,
+      grep: false,
+      list: false,
+      patch: false,
+      todowrite: false,
+      todoread: false,
+      task: false
+    }
+  }, null, 2), "utf8");
   return workspace;
 };
 
 /**
- * onThinking carries all in-progress output (reasoning items and the interim
- * agent messages between tool calls); onAnswer fires once with the final answer.
+ * onThinking carries all in-progress output (reasoning parts and the interim
+ * text parts between tool calls); onAnswer fires once with the final answer.
  * @param {{ docKey: string, prompt: string, model?: string, documentState?: string,
  *           mcpUrl: string, mcpToken: string,
  *           onAnswer: (text: string) => void, onThinking?: (text: string) => void, log: (line: string) => void }} input
  * @returns {{ finished: Promise<{reason: string, error?: string}>, interrupt: () => void }}
  */
 export const startTurn = ({ docKey, prompt, model, documentState, mcpUrl, mcpToken, onAnswer, onThinking, log }) => {
-  const cli = findCodexCli();
+  const cli = findOpencodeCli();
   let interrupted = false;
   let child = null;
 
   const finished = (async () => {
-    if (!cli) return { reason: "error", error: "The codex CLI was not found." };
+    if (!cli) return { reason: "error", error: "The opencode CLI was not found." };
 
-    const args = [
-      ...cli.prefixArgs,
-      "exec",
-      "--json",
-      "--skip-git-repo-check",
-      "--sandbox", "read-only",
-      "--config", `mcp_servers.inktile.url="${mcpUrl}"`,
-      "--config", `mcp_servers.inktile.bearer_token_env_var="${MCP_TOKEN_ENV}"`,
-      "--config", `web_search="live"`
-    ];
+    const args = [...cli.prefixArgs, "run", "--format", "json"];
     if (model) args.push("--model", model);
-    const resumeId = threads.get(docKey);
-    if (resumeId) args.push("resume", resumeId);
+    const resumeId = sessions.get(docKey);
+    if (resumeId) args.push("--session", resumeId);
+    args.push(prompt);
 
     child = spawn(cli.command, args, {
       windowsHide: true,
-      cwd: ensureWorkspace(documentState),
+      cwd: ensureWorkspace(documentState, mcpUrl),
       env: { ...process.env, [MCP_TOKEN_ENV]: mcpToken },
       stdio: ["pipe", "pipe", "pipe"]
     });
-    child.stdin.write(prompt);
+    // The prompt travels as an argument; close stdin so a non-TTY run never
+    // waits on piped input.
     child.stdin.end();
 
     const stderrTail = tail(child.stderr);
@@ -118,23 +134,18 @@ export const startTurn = ({ docKey, prompt, model, documentState, mcpUrl, mcpTok
       } catch {
         continue;
       }
-      if (event.type === "thread.started" && typeof event.thread_id === "string") {
-        threads.set(docKey, event.thread_id);
-      } else if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text) {
-        // Mid-turn agent messages are process notes: shown ephemerally like
+      // Every event carries the session id; remember it for multi-turn resume.
+      const sessionId = event.sessionID ?? event.part?.sessionID;
+      if (typeof sessionId === "string" && sessionId) sessions.set(docKey, sessionId);
+      if (event.type === "text" && event.part?.text) {
+        // Mid-turn text parts are process notes: shown ephemerally like
         // reasoning. The last one standing when the turn succeeds is the answer.
-        finalAnswer = event.item.text;
-        onThinking?.(`${event.item.text}\n\n`);
-      } else if (event.type === "item.completed" && event.item?.type === "reasoning" && event.item.text) {
-        // Reasoning items are ephemeral thinking: streamed to the panel while the
-        // turn runs, never persisted into the transcript or the document.
-        onThinking?.(`${event.item.text}\n\n`);
-      } else if (event.type === "item.completed" && event.item?.type === "error") {
-        failure = event.item.message;
-      } else if (event.type === "turn.failed") {
-        failure = event.error?.message ?? "The Codex turn failed.";
+        finalAnswer = event.part.text;
+        onThinking?.(`${event.part.text}\n\n`);
+      } else if (event.type === "reasoning" && event.part?.text) {
+        onThinking?.(`${event.part.text}\n\n`);
       } else if (event.type === "error") {
-        failure = event.message;
+        failure = event.error?.data?.message ?? event.error?.message ?? event.error?.name ?? "The OpenCode turn failed.";
       }
     }
 
@@ -142,10 +153,11 @@ export const startTurn = ({ docKey, prompt, model, documentState, mcpUrl, mcpTok
     if (interrupted) return { reason: "stopped" };
     if (failure) return { reason: "error", error: failure };
     if (exitCode !== 0) {
-      threads.delete(docKey);
+      // A stale resumed session must not wedge the document permanently.
+      sessions.delete(docKey);
       const detail = stderrTail().trim();
-      log(`codex exited ${exitCode}: ${detail}`);
-      return { reason: "error", error: `The codex CLI exited with code ${exitCode}.${detail ? ` ${detail}` : ""}` };
+      log(`opencode exited ${exitCode}: ${detail}`);
+      return { reason: "error", error: `The opencode CLI exited with code ${exitCode}.${detail ? ` ${detail}` : ""}` };
     }
     if (finalAnswer.trim()) onAnswer(finalAnswer);
     return { reason: "done" };

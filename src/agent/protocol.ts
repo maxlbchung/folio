@@ -8,7 +8,7 @@
  * unchanged. agent/*.mjs mirrors these shapes.
  */
 
-export type AgentBackendId = "claude" | "codex";
+export type AgentBackendId = "claude" | "codex" | "opencode";
 
 /** Snapshot of one page as the agent sees it (manifest-shaped, no runtime blobs). */
 export interface AgentPageSnapshot {
@@ -17,13 +17,16 @@ export interface AgentPageSnapshot {
   component: "text" | "versions" | "drawing" | "image" | "video" | "audio" | "empty";
   /** Current HTML for text pages (front face). */
   html?: string;
-  /** Asset metadata for media pages. */
-  asset?: { id: string; filename: string; mimeType: string; byteLength: number };
+  /** Asset metadata for media pages; width/height are the intrinsic pixel
+   * dimensions of the image or video, when the bytes could be decoded. */
+  asset?: { id: string; filename: string; mimeType: string; byteLength: number; width?: number; height?: number };
   alt?: string;
   /** Persisted row height in px (pages in one row share it). */
   height?: number;
   /** This page's share of its row width (only in multi-page rows). */
   widthFraction?: number;
+  /** Rendered tile width in px: the document's pageWidth × this page's row share. */
+  widthPx: number;
   align?: "top" | "center" | "bottom";
   /** Back-face ("notes") HTML, when the page has notes. */
   notesHtml?: string;
@@ -46,6 +49,8 @@ export interface AgentStroke {
 export interface AgentDocumentSnapshot {
   id: string;
   title: string;
+  /** Fixed layout width in px that every row spans; column splits divide it. */
+  pageWidth: number;
   /** Rows of page ids, left to right — the canonical visual layout (max 4 per row). */
   pageRows: string[][];
   pages: AgentPageSnapshot[];
@@ -111,9 +116,12 @@ export type BrokerToAppMessage =
    * memory — must read), "changed" (user edited since the agent's last turn),
    * or "unchanged" (revision identical — re-reading was waived). */
   | { type: "turn-start"; promptId: string; documentState?: "first" | "changed" | "unchanged" }
-  | { type: "narration"; promptId: string; text: string }
-  /** The model's live reasoning: ephemeral, shown while the agent works and
-   * dropped as soon as it produces a message or the turn ends. Never persisted. */
+  /** The turn's final answer — the only model text that persists in the
+   * transcript. Sent once, when the backend's turn completes cleanly. */
+  | { type: "answer"; promptId: string; text: string }
+  /** Live in-progress output — reasoning plus the interim process notes the
+   * model emits between tool calls. Ephemeral: shown while the agent works and
+   * dropped as soon as the answer lands or the turn ends. Never persisted. */
   | { type: "thinking"; promptId: string; text: string }
   | { type: "op"; callId: string; op: AgentOp }
   | { type: "turn-end"; promptId: string; reason: "done" | "stopped" | "error"; error?: string }

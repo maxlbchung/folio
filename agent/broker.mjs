@@ -14,12 +14,13 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import * as claude from "./backend-claude.mjs";
 import * as codex from "./backend-codex.mjs";
+import * as opencode from "./backend-opencode.mjs";
 import { startMcpEndpoint } from "./mcp.mjs";
 import { DocumentSession, OpRejectedError } from "./tools.mjs";
 
 const OP_TIMEOUT_MS = 120_000;
 
-const backends = { claude, codex };
+const backends = { claude, codex, opencode };
 
 const log = (line) => process.stderr.write(`[inktile-agent] ${line}\n`);
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -48,7 +49,7 @@ const dispatchOp = (op) =>
   });
 
 const sendStatus = () => {
-  send({ type: "status", backends: { claude: claude.availability(), codex: codex.availability() } });
+  send({ type: "status", backends: { claude: claude.availability(), codex: codex.availability(), opencode: opencode.availability() } });
 };
 
 const endTurn = (promptId, reason, error) => {
@@ -95,7 +96,7 @@ const handlePrompt = (message, mcp, mcpToken) => {
     documentState,
     mcpUrl: mcp.url,
     mcpToken,
-    onNarration: (text) => send({ type: "narration", promptId: message.promptId, text }),
+    onAnswer: (text) => send({ type: "answer", promptId: message.promptId, text }),
     onThinking: (text) => send({ type: "thinking", promptId: message.promptId, text }),
     log
   });
@@ -146,6 +147,7 @@ const main = async () => {
       if (typeof message.docId === "string") {
         claude.clearSession(message.docId);
         codex.clearSession(message.docId);
+        opencode.clearSession(message.docId);
         lastTurnRevisions.delete(message.docId);
       }
     } else if (message.type === "prompt") {

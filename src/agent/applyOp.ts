@@ -1,8 +1,8 @@
 import { flushSync } from "react-dom";
 import type { DocumentContextValue } from "../document/DocumentContext";
-import { MIN_DRAWING_HEIGHT, uuid } from "../document/factories";
+import { MIN_DRAWING_HEIGHT, MIN_MEDIA_HEIGHT, uuid } from "../document/factories";
 import { detectMediaPageType } from "../document/mediaTypes";
-import type { DrawingStroke, InktileDocument, InktilePage, VariantGroupBlock } from "../document/types";
+import type { DrawingStroke, InktileDocument, InktilePage, RuntimeAssetMap, VariantGroupBlock } from "../document/types";
 import type {
   AgentDocumentSnapshot,
   AgentOp,
@@ -31,13 +31,58 @@ const notesHtml = (page: InktilePage): string | undefined => {
   return block && block.type === "text" ? block.html : undefined;
 };
 
-const pageSnapshot = (document: InktileDocument, page: InktilePage): AgentPageSnapshot => {
-  const shared: Partial<AgentPageSnapshot> = {
+/** Intrinsic media dimensions per asset id, measured once from the asset bytes
+ * (asset content is immutable). Only successes are cached so a failed decode
+ * can retry when the asset becomes readable again. */
+const assetDimensions = new Map<string, { width: number; height: number }>();
+
+const MEASURE_TIMEOUT_MS = 3000;
+
+/** Decodes an image or video just far enough to learn its intrinsic pixel size. */
+const measureMediaUrl = (url: string, kind: "image" | "video") =>
+  new Promise<{ width: number; height: number } | null>((resolve) => {
+    const timer = window.setTimeout(() => resolve(null), MEASURE_TIMEOUT_MS);
+    const settle = (width: number, height: number) => {
+      window.clearTimeout(timer);
+      resolve(width > 0 && height > 0 ? { width, height } : null);
+    };
+    if (kind === "image") {
+      const image = new Image();
+      image.onload = () => settle(image.naturalWidth, image.naturalHeight);
+      image.onerror = () => settle(0, 0);
+      image.src = url;
+    } else {
+      const video = document.createElement("video");
+      video.preload = "metadata";
+      video.onloadedmetadata = () => settle(video.videoWidth, video.videoHeight);
+      video.onerror = () => settle(0, 0);
+      video.src = url;
+    }
+  });
+
+const measureAsset = async (assetId: string, assets: RuntimeAssetMap, kind: "image" | "video") => {
+  const cached = assetDimensions.get(assetId);
+  if (cached) return cached;
+  const url = assets[assetId]?.url;
+  if (!url) return null;
+  const size = await measureMediaUrl(url, kind);
+  if (size) assetDimensions.set(assetId, size);
+  return size;
+};
+
+const mediaBlockOf = (page: InktilePage) => {
+  const block = page.type === "drawing" ? undefined : page.front.blocks[0];
+  return block && (block.type === "image" || block.type === "video") ? block : undefined;
+};
+
+const pageSnapshot = (document: InktileDocument, page: InktilePage, widthPx: number): AgentPageSnapshot => {
+  const shared = {
     height: page.layoutHeight,
     widthFraction: page.layoutWidthFraction,
+    widthPx,
     align: page.verticalAlign,
     notesHtml: notesHtml(page)
-  };
+  } satisfies Partial<AgentPageSnapshot>;
   if (page.type === "drawing") {
     return {
       id: page.id,
@@ -60,28 +105,42 @@ const pageSnapshot = (document: InktileDocument, page: InktilePage): AgentPageSn
   }
   if (block.type === "image" || block.type === "video" || block.type === "audio") {
     const metadata = document.assets[block.assetId];
+    const size = assetDimensions.get(block.assetId);
     return {
       id: page.id,
       component: block.type,
       ...shared,
       alt: block.type === "image" ? block.alt : undefined,
       asset: metadata
-        ? { id: metadata.id, filename: metadata.filename, mimeType: metadata.mimeType, byteLength: metadata.byteLength }
+        ? { id: metadata.id, filename: metadata.filename, mimeType: metadata.mimeType, byteLength: metadata.byteLength, ...size }
         : undefined
     };
   }
   return { id: page.id, component: "empty", ...shared };
 };
 
-const documentSnapshot = (document: InktileDocument): AgentDocumentSnapshot => ({
-  id: document.id,
-  title: document.title,
-  pageRows: document.pageRows.map((row) => [...row]),
-  pages: document.pageOrder
+const documentSnapshot = async (document: InktileDocument, assets: RuntimeAssetMap): Promise<AgentDocumentSnapshot> => {
+  const pages = document.pageOrder
     .map((pageId) => document.pages[pageId])
-    .filter((page): page is InktilePage => Boolean(page))
-    .map((page) => pageSnapshot(document, page))
-});
+    .filter((page): page is InktilePage => Boolean(page));
+  // Measure intrinsic media dimensions up front (cached across reads) so every
+  // media snapshot reports them alongside the tile's rendered size.
+  await Promise.all(pages.map(async (page) => {
+    const block = mediaBlockOf(page);
+    if (block) await measureAsset(block.assetId, assets, block.type);
+  }));
+  const rowShare = new Map<string, number>();
+  document.pageRows.forEach((row) => row.forEach((pageId) => {
+    rowShare.set(pageId, document.pages[pageId]?.layoutWidthFraction ?? 1 / row.length);
+  }));
+  return {
+    id: document.id,
+    title: document.title,
+    pageWidth: document.settings.pageWidth,
+    pageRows: document.pageRows.map((row) => [...row]),
+    pages: pages.map((page) => pageSnapshot(document, page, Math.round(document.settings.pageWidth * (rowShare.get(page.id) ?? 1))))
+  };
+};
 
 const requireRevision = (baseRevision: number, context: DocumentContextValue) => {
   if (baseRevision !== context.getRevision()) {
@@ -174,7 +233,7 @@ const decodeBase64 = (data: string): Uint8Array => {
 export async function applyAgentOp(op: AgentOp, context: DocumentContextValue): Promise<AgentOpResult> {
   switch (op.kind) {
     case "read_document": {
-      return { revision: context.getRevision(), document: documentSnapshot(context.getDocumentSnapshot()) };
+      return { revision: context.getRevision(), document: await documentSnapshot(context.getDocumentSnapshot(), context.assets) };
     }
 
     case "set_title": {
@@ -343,11 +402,29 @@ export async function applyAgentOp(op: AgentOp, context: DocumentContextValue): 
       if (!type) throw new AgentOpError("invalid", `Unsupported media type ${op.mimeType}.`);
       const bytes = decodeBase64(op.bytesBase64);
       const file = new File([bytes as BlobPart], op.filename, { type: op.mimeType });
+      // Size the new row to the media's aspect ratio at full document width so
+      // "contain" fills the tile instead of letterboxing (420 px only when the
+      // bytes cannot be decoded).
+      let size: { width: number; height: number } | null = null;
+      let mediaHeight = 420;
+      if (type === "image" || type === "video") {
+        const url = URL.createObjectURL(file);
+        try {
+          size = await measureMediaUrl(url, type);
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+        if (size) {
+          const pageWidth = context.getDocumentSnapshot().settings.pageWidth;
+          mediaHeight = clamp(Math.round((pageWidth * size.height) / size.width), MIN_MEDIA_HEIGHT, MAX_ROW_HEIGHT);
+        }
+      }
       const assetId = await context.addAsset(file);
+      if (size) assetDimensions.set(assetId, size);
       let pageId = "";
       flushSync(() => {
-        if (type === "image") pageId = context.addBlockPage({ id: uuid(), type, assetId, height: 420, fit: "contain", alt: op.alt ?? op.filename }, op.afterPageId);
-        if (type === "video") pageId = context.addBlockPage({ id: uuid(), type, assetId, height: 420, fit: "contain", controls: true }, op.afterPageId);
+        if (type === "image") pageId = context.addBlockPage({ id: uuid(), type, assetId, height: mediaHeight, fit: "contain", alt: op.alt ?? op.filename }, op.afterPageId);
+        if (type === "video") pageId = context.addBlockPage({ id: uuid(), type, assetId, height: mediaHeight, fit: "contain", controls: true }, op.afterPageId);
         if (type === "audio") pageId = context.addBlockPage({ id: uuid(), type, assetId, size: "compact" }, op.afterPageId);
       });
       return { revision: context.getRevision(), pageId, assetId };

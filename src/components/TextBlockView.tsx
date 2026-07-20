@@ -1,6 +1,7 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useDocument } from "../document/DocumentContext";
 import type { TextBlock } from "../document/types";
+import { stripCaretArtifacts } from "../utils/editorHtml";
 
 interface TextBlockViewProps {
   block: TextBlock;
@@ -13,6 +14,9 @@ export function TextBlockView({ block, onChange, onStartChange }: TextBlockViewP
   const ref = useRef<HTMLDivElement>(null);
   const startValue = useRef(block.html);
   const changeStarted = useRef(false);
+  // Spellcheck only while the tile is being edited: flipping the attribute off on blur makes
+  // Chromium drop its red squiggle markers, so idle tiles render clean.
+  const [focused, setFocused] = useState(false);
 
   useLayoutEffect(() => {
     if (ref.current && ref.current.innerHTML !== block.html && document.activeElement !== ref.current) {
@@ -29,14 +33,21 @@ export function TextBlockView({ block, onChange, onStartChange }: TextBlockViewP
       // render without fighting the caret.
       contentEditable={!agentTurn}
       suppressContentEditableWarning
+      spellCheck={focused}
       data-placeholder="Start writing…"
-      onFocus={() => { startValue.current = ref.current?.innerHTML ?? ""; changeStarted.current = false; }}
+      onFocus={() => { setFocused(true); startValue.current = ref.current?.innerHTML ?? ""; changeStarted.current = false; }}
       onInput={(event) => {
         if (!changeStarted.current) { onStartChange(); changeStarted.current = true; }
-        onChange(event.currentTarget.innerHTML, false);
+        // Stored HTML is cleaned of caret anchors; the live DOM keeps them so the trick
+        // holds while focused (the layout effect above skips the focused element).
+        onChange(stripCaretArtifacts(event.currentTarget.innerHTML), false);
       }}
       onBlur={(event) => {
-        const value = event.currentTarget.innerHTML;
+        setFocused(false);
+        const value = stripCaretArtifacts(event.currentTarget.innerHTML);
+        // Caret anchors are only needed while editing; with focus gone, scrub them from
+        // the live DOM too (the stored HTML alone won't trigger a rewrite when equal).
+        if (event.currentTarget.innerHTML !== value) event.currentTarget.innerHTML = value;
         if (value !== startValue.current) onChange(value, false);
       }}
       onKeyDown={(event) => {

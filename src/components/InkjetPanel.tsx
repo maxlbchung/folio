@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { applyAgentOp, AgentOpError } from "../agent/applyOp";
-import { AgentClient, type AgentConnectionState } from "../agent/connection";
+import { AgentClient, agentSupportedHere, type AgentConnectionState } from "../agent/connection";
 import type { AgentBackendId, AgentBackendStatus, BrokerToAppMessage } from "../agent/protocol";
 import { useDocument } from "../document/DocumentContext";
 import { uuid } from "../document/factories";
@@ -18,11 +18,12 @@ interface SessionChoice {
   model: string;
 }
 
-const PROVIDER_IDS: AgentBackendId[] = ["claude", "codex"];
+const PROVIDER_IDS: AgentBackendId[] = ["claude", "codex", "opencode"];
 
 const PROVIDER_LABEL: Record<AgentBackendId, string> = {
   claude: "Claude",
-  codex: "Codex"
+  codex: "Codex",
+  opencode: "OpenCode"
 };
 
 const PREFS_KEY = "inkjet-session";
@@ -42,6 +43,42 @@ const readPrefs = (): Partial<SessionChoice> => {
 };
 
 const clampWidth = (width: number) => Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
+
+/**
+ * Reveals text as a fast typewriter instead of snapping whole chunks in: a
+ * few characters per frame at minimum, accelerating with the backlog so even
+ * a whole answer arriving at once finishes in well under a second. `instant`
+ * skips the animation for entries that already typed out once. The callbacks
+ * ride refs so parents can pass fresh closures without restarting the effect.
+ */
+function InkjetTyped({ text, markdown, instant, onReveal, onDone }: {
+  text: string;
+  markdown?: boolean;
+  instant?: boolean;
+  onReveal?: () => void;
+  onDone?: () => void;
+}) {
+  const [visible, setVisible] = useState(instant ? text.length : 0);
+  const onRevealRef = useRef(onReveal);
+  onRevealRef.current = onReveal;
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+  useEffect(() => {
+    onRevealRef.current?.();
+    if (visible >= text.length) {
+      onDoneRef.current?.();
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      setVisible((current) =>
+        current >= text.length ? current : Math.min(text.length, current + Math.max(3, Math.ceil((text.length - current) / 12)))
+      );
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [text, visible]);
+  const shown = visible >= text.length ? text : text.slice(0, visible);
+  return markdown ? <InkjetMarkdown text={shown} /> : <>{shown}</>;
+}
 
 const readPanelWidth = (): number => {
   try {
@@ -65,9 +102,10 @@ export function InkjetPanel() {
   const [provider, setProvider] = useState<AgentBackendId | null>(null);
   const [model, setModel] = useState("");
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
-  // The agent's live reasoning is ephemeral: it renders as a temporary bubble
-  // while the turn runs and is dropped the moment a message lands or the turn
-  // ends. It never joins `transcript`, so it is never persisted or scrolled back to.
+  // Everything the agent says mid-turn (reasoning and working notes) is
+  // ephemeral: it renders as a temporary stylized bubble while the turn runs
+  // and is dropped the moment the final answer lands or the turn ends. It never
+  // joins `transcript`, so it is never persisted or scrolled back to.
   const [thinking, setThinking] = useState<{ promptId: string; text: string } | null>(null);
   const [prompt, setPrompt] = useState("");
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
@@ -82,22 +120,27 @@ export function InkjetPanel() {
   const opChainRef = useRef(Promise.resolve());
   const transcriptViewRef = useRef<HTMLDivElement>(null);
   const thinkingTextRef = useRef<HTMLDivElement>(null);
+  // Entries that finished their typewriter reveal: reopening the panel (which
+  // remounts the transcript) must render them instantly, not retype them.
+  const typedRef = useRef(new Set<string>());
+
+  const scrollToEnd = useCallback(() => {
+    const view = transcriptViewRef.current;
+    if (view) view.scrollTop = view.scrollHeight;
+    // Keep the latest reasoning in view inside the capped thinking bubble.
+    const think = thinkingTextRef.current;
+    if (think) think.scrollTop = think.scrollHeight;
+  }, []);
 
   const appendEntry = useCallback((role: TranscriptEntry["role"], text: string) => {
     setTranscript((entries) => [...entries, { id: uuid(), role, text }]);
   }, []);
 
-  const appendNarration = useCallback((text: string) => {
-    // A real message supersedes whatever the agent was thinking toward.
+  const appendAnswer = useCallback((text: string) => {
+    // The final answer replaces the ephemeral thinking/working bubble.
     setThinking(null);
-    setTranscript((entries) => {
-      const last = entries[entries.length - 1];
-      if (last?.role === "agent") {
-        return [...entries.slice(0, -1), { ...last, text: last.text + text }];
-      }
-      return [...entries, { id: uuid(), role: "agent", text }];
-    });
-  }, []);
+    appendEntry("agent", text);
+  }, [appendEntry]);
 
   const appendThinking = useCallback((promptId: string, text: string) => {
     setThinking((current) =>
@@ -128,8 +171,8 @@ export function InkjetPanel() {
       },
       onMessage: (message: BrokerToAppMessage) => {
         if (message.type === "status") setProviders(message.backends);
-        else if (message.type === "narration") {
-          if (turnRef.current?.promptId === message.promptId) appendNarration(message.text);
+        else if (message.type === "answer") {
+          if (turnRef.current?.promptId === message.promptId) appendAnswer(message.text);
         } else if (message.type === "thinking") {
           if (turnRef.current?.promptId === message.promptId) appendThinking(message.promptId, message.text);
         } else if (message.type === "op") {
@@ -171,11 +214,16 @@ export function InkjetPanel() {
     client.connect().catch((error: Error) => setStartError(error.message));
   }, []);
 
+  // The browser build has no broker transport: the panel says so with a single
+  // note and never attempts to connect. Computed per render so the ui-smoke
+  // mock (injected before the panel opens) is picked up.
+  const desktopOnly = !agentSupportedHere();
+
   // Zero setup: opening the panel starts (or reuses) the broker, which then
   // reports which providers are installed and signed in on this machine.
   useEffect(() => {
-    if (open) startAgent();
-  }, [open, startAgent]);
+    if (open && !desktopOnly) startAgent();
+  }, [open, desktopOnly, startAgent]);
 
   // When provider availability arrives, seed the setup choices: restore the
   // remembered provider/model when still valid, otherwise the first available.
@@ -212,12 +260,8 @@ export function InkjetPanel() {
   }, []);
 
   useEffect(() => {
-    const view = transcriptViewRef.current;
-    if (view) view.scrollTop = view.scrollHeight;
-    // Keep the latest reasoning in view inside the capped thinking bubble.
-    const think = thinkingTextRef.current;
-    if (think) think.scrollTop = think.scrollHeight;
-  }, [transcript, thinking]);
+    scrollToEnd();
+  }, [transcript, thinking, scrollToEnd]);
 
   // The composer grows with its content instead of carrying a resize grip:
   // measure the scroll height on every value change, capped so long prompts
@@ -357,8 +401,18 @@ export function InkjetPanel() {
             )}
           </header>
 
-          {!inChat && (
+          {!inChat && desktopOnly && (
             <div className="inkjet-setup">
+              <p className="inkjet-setup__note">Inkjet is a desktop-only feature.</p>
+            </div>
+          )}
+
+          {!inChat && !desktopOnly && (
+            <div className="inkjet-setup">
+              <p className="inkjet-setup__intro">
+                Inkjet is Inktile's built-in AI agent: it writes right into this document,
+                connecting automatically to the AI CLIs installed and signed in on this machine.
+              </p>
               {connection !== "connected" && !startError && <p className="inkjet-setup__note">Starting Inkjet…</p>}
               {startError && (
                 <>
@@ -370,10 +424,9 @@ export function InkjetPanel() {
 
               {availableProviders && availableProviders.length === 0 && (
                 <>
-                  <p className="inkjet-setup__error">No AI providers were found.</p>
-                  {PROVIDER_IDS.map((id) => (
-                    <p key={id} className="inkjet-setup__note">{PROVIDER_LABEL[id]}: {providers?.[id]?.detail}</p>
-                  ))}
+                  <p className="inkjet-setup__note">
+                    No AI CLIs are available — install and sign in to {PROVIDER_IDS.map((id) => PROVIDER_LABEL[id]).join(", ")}, then check again.
+                  </p>
                   <button className="inkjet-setup__retry" onClick={startAgent}>Check again</button>
                 </>
               )}
@@ -382,18 +435,25 @@ export function InkjetPanel() {
                 <>
                   <p className="inkjet-setup__label">Provider</p>
                   <div className="inkjet-setup__providers" role="radiogroup" aria-label="Inkjet provider">
-                    {availableProviders.map((id) => (
-                      <label key={id} className={provider === id ? "is-selected" : ""}>
-                        <input
-                          type="radio"
-                          name="inkjet-provider"
-                          checked={provider === id}
-                          onChange={() => setProvider(id)}
-                        />
-                        <strong>{PROVIDER_LABEL[id]}</strong>
-                        <span>{providers?.[id]?.detail}</span>
-                      </label>
-                    ))}
+                    {PROVIDER_IDS.map((id) => {
+                      const available = providers?.[id]?.available === true;
+                      return (
+                        <label
+                          key={id}
+                          className={[provider === id ? "is-selected" : "", available ? "" : "is-unavailable"].filter(Boolean).join(" ")}
+                        >
+                          <input
+                            type="radio"
+                            name="inkjet-provider"
+                            checked={provider === id}
+                            disabled={!available}
+                            onChange={() => setProvider(id)}
+                          />
+                          <strong>{PROVIDER_LABEL[id]}</strong>
+                          <span>{providers?.[id]?.detail}</span>
+                        </label>
+                      );
+                    })}
                   </div>
                   <p className="inkjet-setup__label">Model</p>
                   <select
@@ -419,14 +479,22 @@ export function InkjetPanel() {
                 <div className="inkjet-panel__transcript" ref={transcriptViewRef}>
                   {transcript.length === 0 && (
                     <p className="inkjet-panel__empty">
-                      Ask Inkjet to write into this inktile. It reads the open document,
-                      streams text into pages, researches on the web, and inserts media —
-                      you can watch it work and undo a whole turn with Ctrl+Z.
+                      Ask Inkjet to write in this inktile — one Ctrl+Z undoes its whole turn.
                     </p>
                   )}
                   {transcript.map((entry) => (
                     <div key={entry.id} className={`inkjet-entry inkjet-entry--${entry.role}`}>
-                      {entry.role === "agent" ? <InkjetMarkdown text={entry.text} /> : entry.text}
+                      {entry.role === "agent"
+                        ? (
+                          <InkjetTyped
+                            text={entry.text}
+                            markdown
+                            instant={typedRef.current.has(entry.id)}
+                            onReveal={scrollToEnd}
+                            onDone={() => typedRef.current.add(entry.id)}
+                          />
+                        )
+                        : entry.text}
                     </div>
                   ))}
                   {thinking && thinking.text.trim() && (
@@ -435,7 +503,9 @@ export function InkjetPanel() {
                         <span className="inkjet-thinking__spark" aria-hidden="true" />
                         Thinking
                       </span>
-                      <div className="inkjet-thinking__text" ref={thinkingTextRef}>{thinking.text}</div>
+                      <div className="inkjet-thinking__text" ref={thinkingTextRef}>
+                        <InkjetTyped key={thinking.promptId} text={thinking.text} onReveal={scrollToEnd} />
+                      </div>
                     </div>
                   )}
                   {agentTurn && !thinking && transcript[transcript.length - 1]?.role !== "agent" && (

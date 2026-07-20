@@ -14,6 +14,7 @@
   <p>
     <a href="#quick-start">Get started</a> ·
     <a href="#what-makes-inktile-different">Why Inktile</a> ·
+    <a href="#inkjet-the-built-in-agent">Inkjet</a> ·
     <a href="#commands">Commands</a>
   </p>
 </div>
@@ -21,7 +22,7 @@
 <br>
 
 <div align="center">
-  <img src="inktile-preview.png" alt="Inktile home library showing a locally stored inktile" width="960">
+  <img src="flower-screenshot.png" alt="Inktile's editor with the Inkjet panel open: a Claude session where the agent added a drawing tile and drew a flower stroke by stroke" width="960">
 </div>
 
 ## The short version
@@ -54,10 +55,26 @@ Start with an empty inktile. Capture a thought as text, keep competing drafts in
 - **Media pages** that detect supported image, video, and audio files in one action
 - **Page composition** with pointer-based ordering, side-by-side grouping, and shared row resizing
 - **A personal knowledge library** for creating, importing, reopening, renaming, pinning, duplicating, deleting, sorting, and searching inktiles
-- **Inkjet, the built-in AI agent** (desktop app): open the panel and it auto-detects the providers signed in on your machine (Claude Code, Codex) — pick one, pick a model, start a session. Zero extra setup. It writes into the open inktile live, researches on the web, and a whole turn reverts with one Ctrl+Z — see the Inkjet section in [Architecture](docs/ARCHITECTURE.md)
+- **Inkjet, the built-in AI agent** (desktop app) that writes, draws, and arranges tiles in the open inktile — [how it works](#inkjet-the-built-in-agent)
 - **Portable `.inktile` archives** with a manifest and separate binary assets
 - **Export** from the toolbar as an `.inktile` archive, a PDF through the system print dialog, or a plain-text `.txt` that keeps every tile's text, all versions, and notes
 - **Browser and Windows desktop modes** backed by the same React editor
+
+## Inkjet, the built-in agent
+
+Inkjet is the writing agent that lives inside the desktop app — it's the panel drawing the flower in the screenshot above. Open it and Inktile detects the AI CLIs already installed and signed in on your machine (Claude Code, Codex, OpenCode). No API keys, no accounts, no configuration: pick a provider, pick a model, start a session, and ask for what you want.
+
+**It edits the document you're looking at.** Inkjet has full control of the open inktile: it writes and edits text in small chunks that render as they arrive, creates, arranges, and deletes tiles, keeps notes on tile backs, manages version pages, authors drawings stroke by stroke, and adds SVG illustrations or media found while researching on the web.
+
+**You stay in charge.**
+
+- While a turn runs, the workspace locks read-only with an "Inkjet is printing" indicator and a Stop button.
+- The model's reasoning and working notes stream into a temporary "thinking" bubble; only its final answer lands in the transcript.
+- An entire turn — however many edits it made — reverts with a single Ctrl+Z. Stop keeps what's already written, still as one undo step.
+
+**It's local and contained.** The panel talks to a small dependency-free broker the app spawns on demand; the broker drives your own CLI on your existing login and never touches your files. Every change flows through the app's own document mutations, so layout rules, autosave, and history behave exactly as if you had made the edit yourself — and a revision guard forces the agent to re-read whenever you've edited the document since its last look. The providers run with web research only: no shell, no filesystem.
+
+The full mechanics — broker, wire protocol, turn lock, revision guard — are documented in [Architecture](docs/ARCHITECTURE.md).
 
 ## Quick start
 
@@ -117,7 +134,7 @@ The UI smoke suite needs Chromium. Set `CHROMIUM_PATH` when it is not available 
 | `src/components/` | Editor UI and page renderers |
 | `src/document/` | Persisted types, factories, normalization, and mutations |
 | `src/persistence/` | ZIP archive, native/browser file IO, export, and recovery autosave |
-| `agent/` | Zero-dependency Inkjet broker that drives the Claude Code and Codex CLIs |
+| `agent/` | Zero-dependency Inkjet broker that drives the Claude Code, Codex, and OpenCode CLIs |
 | `src-tauri/` | Native shell, permissions, icons, and bundling |
 | `scripts/` | Smoke tests, docs checks, hooks, and release automation |
 

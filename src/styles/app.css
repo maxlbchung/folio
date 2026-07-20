@@ -295,7 +295,11 @@ button:disabled { cursor: default; opacity: .35; }
 .topbar__divider, .text-toolbar__divider { width: 1px; height: 17px; margin: 0 3px; background: var(--line); }
 .zoom-value { min-width: 38px; height: 24px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 9px; padding: 0 3px; }
 .zoom-value:hover { background: var(--hover); color: var(--text); }
-.text-toolbar { position: absolute; top: 7px; left: 50%; transform: translateX(-50%); height: 31px; display: flex; align-items: center; justify-content: center; gap: 2px; padding: 0; overflow-x: auto; }
+/* Anchored to the free band between the topbar's left and right clusters (fixed-width
+   content) rather than centered on the window, so a full toolbar can never sit on top of
+   their buttons; when the band is narrower than the controls it scrolls internally.
+   `safe center` keeps the left edge reachable while overflowing (plain center fallback). */
+.text-toolbar { position: absolute; top: 7px; left: 312px; right: 192px; height: 31px; display: flex; align-items: center; justify-content: center; justify-content: safe center; gap: 2px; padding: 0; overflow-x: auto; }
 .text-toolbar select { height: 25px; border: 1px solid transparent; border-radius: 5px; background: var(--page-bg); color: var(--text); font-size: 10px; padding: 0 20px 0 6px; }
 .text-toolbar select:hover, .text-toolbar select:focus { background: var(--hover); color: var(--text); outline: none; }
 .format-button { width: 26px; height: 25px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); display: grid; place-items: center; font-family: Georgia, "Times New Roman", serif; font-size: 12px; }
@@ -303,6 +307,23 @@ button:disabled { cursor: default; opacity: .35; }
 .format-button.is-active { background: var(--hover); color: var(--text); }
 .format-button--underline { text-decoration: underline; text-underline-offset: 2px; }
 .format-button--strike { text-decoration: line-through; }
+.format-button--script { font-size: 10px; }
+.format-button--script sub, .format-button--script sup { font-size: 7px; }
+.format-button--swatch { grid-template-rows: 1fr auto; row-gap: 0; padding: 3px 0 4px; }
+.format-button--swatch .swatch-glyph { font-size: 11px; line-height: 1; }
+.format-button--swatch svg { margin-top: 1px; }
+.swatch-bar { width: 14px; height: 3px; border-radius: 1px; }
+.swatch-bar--outlined { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 25%, transparent); }
+
+.color-menu { position: fixed; z-index: 600; border: 1px solid var(--line); border-radius: 6px; background: var(--page-bg); box-shadow: 0 18px 48px rgba(20,20,18,.20); padding: 6px; animation: home-menu-in .1s ease; }
+:root[data-theme="dark"] .color-menu { box-shadow: 0 18px 48px rgba(0,0,0,.45); }
+.color-menu__default { width: 100%; display: flex; align-items: center; gap: 7px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font-size: 11px; font-weight: 550; text-align: left; padding: 4px 5px; margin-bottom: 5px; }
+.color-menu__default:hover { background: var(--hover); }
+.color-menu__none-swatch { width: 14px; height: 14px; flex: 0 0 auto; border-radius: 3px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 30%, transparent); background: linear-gradient(to top right, transparent 44%, #cf4b3c 44%, #cf4b3c 56%, transparent 56%); }
+.color-menu__grid { display: grid; gap: 4px; }
+.color-menu__swatch { width: 20px; height: 20px; border: 0; border-radius: 4px; padding: 0; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 22%, transparent); }
+.color-menu__swatch:hover { transform: scale(1.15); }
+.color-menu__swatch.is-active { outline: 2px solid var(--text); outline-offset: 1px; }
 
 /* Generous bottom room lets the last tile scroll up well clear of the window edge (scroll
    past the end), instead of bottoming out right under the document. */
@@ -439,6 +460,7 @@ button:disabled { cursor: default; opacity: .35; }
   min-height: 26px; line-height: 1.55; outline: none; white-space: pre-wrap; overflow-wrap: anywhere; font-family: Arial, Helvetica, sans-serif; font-size: 15px;
 }
 .text-block:empty::before, .variant-editor:empty::before { content: attr(data-placeholder); color: var(--subtle); pointer-events: none; }
+.text-block ul, .text-block ol, .variant-editor ul, .variant-editor ol { margin: 4px 0; padding-left: 24px; }
 
 .media-frame { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface); }
 .media-frame > img, .media-frame > video { width: 100%; height: 100%; display: block; }
@@ -566,6 +588,7 @@ button:disabled { cursor: default; opacity: .35; }
 /* Session setup: pick a detected provider, pick a model, start. */
 .inkjet-setup { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 9px; padding: 12px; }
 .inkjet-setup::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.inkjet-setup__intro { margin: 0 0 2px; padding-bottom: 9px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10.5px; line-height: 1.5; }
 .inkjet-setup__note { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
 .inkjet-setup__error { margin: 0; color: var(--danger); font-size: 10.5px; line-height: 1.5; }
 .inkjet-setup__retry { align-self: flex-start; height: 26px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); padding: 0 12px; font-size: 10.5px; }
@@ -575,6 +598,8 @@ button:disabled { cursor: default; opacity: .35; }
 .inkjet-setup__providers label { position: relative; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 7px; padding: 9px 11px; cursor: pointer; }
 .inkjet-setup__providers label:hover { background: var(--hover); }
 .inkjet-setup__providers label.is-selected { border-color: var(--library-accent); background: color-mix(in srgb, var(--library-accent) 9%, var(--page-bg)); }
+.inkjet-setup__providers label.is-unavailable { opacity: .45; cursor: default; }
+.inkjet-setup__providers label.is-unavailable:hover { background: none; }
 .inkjet-setup__providers input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .inkjet-setup__providers label:has(input:focus-visible) { outline: 2px solid var(--selected); outline-offset: 2px; }
 .inkjet-setup__providers strong { font-size: 12px; }

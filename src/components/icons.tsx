@@ -25,6 +25,8 @@ export const AlignTopIcon = (props: IconProps) => <Icon {...props}><path d="M5 4
 export const AlignMiddleIcon = (props: IconProps) => <Icon {...props}><path d="M4 12h16M7 7v10M12 8v8M17 9v6"/></Icon>;
 export const AlignBottomIcon = (props: IconProps) => <Icon {...props}><path d="M5 20h14M7 7v9M12 10v6M17 13v3"/></Icon>;
 export const RemoveFormatIcon = (props: IconProps) => <Icon {...props}><path d="m4 20 16-16M8 5h10M13 5l-4 12M6 17h7"/></Icon>;
+export const BulletListIcon = (props: IconProps) => <Icon {...props}><path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></Icon>;
+export const NumberedListIcon = (props: IconProps) => <Icon {...props}><path d="M10 6h11M10 12h11M10 18h11M4 10h2M4 6h1v4M6 18H4c0-1 2-1.6 2-3 0-.9-1-1.2-2-.6"/></Icon>;
 export const SaveIcon = (props: IconProps) => <Icon {...props}><path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-8h8v8" /></Icon>;
 export const ExportIcon = (props: IconProps) => <Icon {...props}><path d="M12 3v12M7 10l5 5 5-5M4 20h16" /></Icon>;
 export const FolderIcon = (props: IconProps) => <Icon {...props}><path d="M3 6h7l2 2h9v11H3z" /></Icon>;

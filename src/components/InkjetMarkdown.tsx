@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 /**
- * Small dependency-free markdown renderer for Inkjet's narration bubbles.
+ * Small dependency-free markdown renderer for Inkjet's answer bubbles.
  * Builds React elements (never raw HTML), so model output cannot inject
  * markup. Covers the chat subset: paragraphs with line breaks, headings,
  * bullet/numbered lists, blockquotes, fenced and inline code, bold, italic,

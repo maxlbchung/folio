@@ -29,7 +29,7 @@ Route work by responsibility:
 - Keep browser/native differences inside `src/persistence/fileSystem.ts` or the Tauri boundary.
 - Keep the home library (cards, pinning, duplication, search, settings) in `src/components/InktileHome.tsx`, with catalog persistence in `src/persistence/library.ts` and device preferences in `src/persistence/preferences.ts`.
 - Keep export in `src/persistence/exportDocument.ts` with its format picker in `src/components/ExportDialog.tsx`.
-- Keep Inkjet's typed protocol and op application in `src/agent/`, its panel in `src/components/InkjetPanel.tsx`, and the broker that drives the Claude Code and Codex CLIs in `agent/*.mjs` — dependency-free plain Node with its own `npm run check:agent` typecheck; the app is the only writer, so document mutations stay in `DocumentContext`.
+- Keep Inkjet's typed protocol and op application in `src/agent/`, its panel in `src/components/InkjetPanel.tsx`, and the broker that drives the Claude Code, Codex, and OpenCode CLIs in `agent/*.mjs` — dependency-free plain Node with its own `npm run check:agent` typecheck; the app is the only writer, so document mutations stay in `DocumentContext`.
 
 Maintain `pageRows` as canonical and synchronize `pageOrder`. Preserve one component per page, a four-column maximum, constant document width, equal grouped height with default-equal (but draggable) grouped widths, external control rails, content-aware minimum heights, and empty placeholder-only defaults.
 

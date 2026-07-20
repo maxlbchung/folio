@@ -109,7 +109,7 @@ try {
 
   await page.goto(smokeUrl);
   await page.locator('.library').waitFor({ state: 'visible' });
-  const inktileLogo = page.locator('.inktile-wordmark img[src="/inktile-logo.png"]');
+  const inktileLogo = page.locator('.inktile-wordmark img[src="./inktile-logo.png"]');
   await inktileLogo.waitFor({ state: 'visible' });
   assert.equal(await inktileLogo.evaluate((image) => image.complete && image.naturalWidth > 0), true, 'Inktile wordmark logo loads');
   await page.getByLabel('Delete Version two fixture').waitFor({ state: 'visible' });
@@ -170,7 +170,7 @@ try {
   await page.locator('.page-insert__trigger').waitFor({ state: 'visible' });
   await page.locator('.document-title').fill('Research notes');
   await page.locator('.page-insert__trigger').click();
-  await page.getByRole('button', { name: /^Text/ }).click();
+  await page.getByRole('button', { name: /^Text Write/ }).click();
   await page.locator('.text-block').click();
   await page.keyboard.type('signal signal signal');
   await page.getByRole('button', { name: 'Back to inktiles' }).click();
@@ -245,7 +245,7 @@ try {
   assert.equal(await page.locator('.page-card').count(), 0, 'starts without prepopulated pages');
 
   await page.locator('.page-insert__trigger').click();
-  await page.getByRole('button', { name: /^Text/ }).click();
+  await page.getByRole('button', { name: /^Text Write/ }).click();
   assert.equal(await page.locator('.page-card').count(), 1, 'adds a text page');
   const textCardSpacing = await page.locator('.page-card').first().evaluate((element) => {
     // Padding lives on the face (page front / notes back share one card), not the card.
@@ -561,7 +561,7 @@ try {
   assert.equal(await textWrapper.locator('.page-card').evaluate((element) => element.scrollHeight <= element.clientHeight + 1), true, 'row shrinking never compacts existing text');
 
   await page.locator('.page-insert__trigger').click();
-  await page.getByRole('button', { name: /^Text/ }).click();
+  await page.getByRole('button', { name: /^Text Write/ }).click();
   assert.equal(await page.locator('.page-card').count(), 5, 'adds a fifth page in its own row');
   const stackBox = await page.locator('.page-stack').boundingBox();
   const boundaryBox = await page.locator('.page-boundary').boundingBox();
@@ -1034,12 +1034,21 @@ try {
   assert.ok(Number(await rowStripSpanOpacity()) > 0.5, 'hovering an edge strip itself bolds that strip');
   assert.equal(await columnStripSpanOpacity(), '0', 'hovering one edge strip leaves the other edges unbolded');
 
+  // In a plain browser (no desktop shell, no mock injected yet), the Inkjet
+  // panel announces itself as desktop-only: one note, no connect attempt, no
+  // retry button or provider details.
+  await page.getByRole('button', { name: 'Inkjet panel' }).click();
+  await page.locator('.inkjet-setup__note').waitFor({ state: 'visible' });
+  assert.match(await page.locator('.inkjet-setup').innerText(), /desktop-only/i, 'the browser build announces Inkjet as desktop-only');
+  assert.equal(await page.locator('.inkjet-setup button').count(), 0, 'the desktop-only note stands alone — no retry or other controls');
+  await page.getByRole('button', { name: 'Inkjet panel' }).click();
+
   // Agent turn: a mocked broker transport (mirroring the Tauri IPC mock) drives the real
   // panel, connection, op application, and turn lock. Covers: read-only lock while a turn
   // runs, live op streaming into the document, the revision guard rejecting stale writes,
   // one-undo-per-turn semantics, and the stop button keeping partial work.
   await page.evaluate(() => {
-    const state = { receive: null, log: { staleRejected: false, stopRequested: false, error: null, opFailure: null, model: null } };
+    const state = { receive: null, log: { staleRejected: false, stopRequested: false, error: null, opFailure: null, model: null, imageSizing: null } };
     window.__inktileAgentMockState = state;
     const waiters = [];
     const results = [];
@@ -1067,7 +1076,9 @@ try {
     })();
     const runScriptedTurn = async (prompt) => {
       state.receive(JSON.stringify({ type: 'turn-start', promptId: prompt.promptId }));
-      state.receive(JSON.stringify({ type: 'narration', promptId: prompt.promptId, text: 'Writing a **short report** into a new page…\n\n- reading the document\n- streaming the text' }));
+      // In-progress process notes ride the ephemeral thinking channel; only the
+      // final answer (sent at the end of the turn) persists in the transcript.
+      state.receive(JSON.stringify({ type: 'thinking', promptId: prompt.promptId, text: 'Planning a short report page…' }));
       const read = await sendOp({ kind: 'read_document' });
       let revision = read.result.revision;
       const lastPageId = read.result.document.pageRows.flat().at(-1);
@@ -1095,14 +1106,27 @@ try {
       const drawing = await mustOk({ kind: 'create_drawing', afterPageId: versions.pageId, height: 260, strokes: [{ tool: 'pen', width: 4, points: [{ x: 0.2, y: 0.2 }, { x: 0.5, y: 0.4 }, { x: 0.8, y: 0.8 }] }] });
       await mustOk({ kind: 'edit_drawing', pageId: drawing.pageId, strokes: [{ tool: 'highlighter', points: [{ x: 0.1, y: 0.9 }, { x: 0.9, y: 0.9 }] }], mode: 'append' });
       await mustOk({ kind: 'insert_media', afterPageId: drawing.pageId, filename: 'ping.wav', mimeType: 'audio/wav', alt: 'test tone', bytesBase64: wavBase64 });
+      // A 2:1 SVG: its row must auto-size to the aspect ratio, and read_document
+      // must report the pixel geometry (pageWidth, widthPx, intrinsic size).
+      const svgBase64 = btoa('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="#3a6"/></svg>');
+      const image = await mustOk({ kind: 'insert_media', afterPageId: drawing.pageId, filename: 'wide.svg', mimeType: 'image/svg+xml', alt: 'wide banner', bytesBase64: svgBase64 });
+      const reread = await mustOk({ kind: 'read_document' });
+      const imagePage = reread.document.pages.find((candidate) => candidate.id === image.pageId);
+      state.log.imageSizing = imagePage ? {
+        pageWidth: reread.document.pageWidth,
+        widthPx: imagePage.widthPx,
+        height: imagePage.height,
+        asset: `${imagePage.asset?.width}x${imagePage.asset?.height}`
+      } : null;
       await mustOk({ kind: 'set_row_height', pageId, height: 300 });
       await mustOk({ kind: 'edit_notes', pageId, html: '<p>note from inkjet</p>' });
-      await mustOk({ kind: 'delete_pages', pageIds: [versions.pageId] });
+      await mustOk({ kind: 'delete_pages', pageIds: [versions.pageId, image.pageId] });
+      state.receive(JSON.stringify({ type: 'answer', promptId: prompt.promptId, text: 'Wrote a **short report** into a new page…\n\n- reading the document\n- streaming the text' }));
       state.receive(JSON.stringify({ type: 'turn-end', promptId: prompt.promptId, reason: 'done' }));
     };
     const runSlowTurn = async (prompt) => {
       state.receive(JSON.stringify({ type: 'turn-start', promptId: prompt.promptId }));
-      // Ephemeral reasoning: with no narration to supersede it, this thinking
+      // Ephemeral reasoning: with no answer to supersede it, this thinking
       // bubble persists through the whole turn and is dropped only at turn-end.
       state.receive(JSON.stringify({ type: 'thinking', promptId: prompt.promptId, text: 'Planning the slow drip, one word at a time…' }));
       const read = await sendOp({ kind: 'read_document' });
@@ -1130,7 +1154,8 @@ try {
                 type: 'status',
                 backends: {
                   claude: { available: true, detail: 'Using your existing Claude Code login.', models: [{ id: '', label: 'Default' }, { id: 'sonnet', label: 'Sonnet' }] },
-                  codex: { available: false, detail: 'The codex CLI was not found.', models: [] }
+                  codex: { available: false, detail: 'The codex CLI was not found.', models: [] },
+                  opencode: { available: false, detail: 'The opencode CLI was not found.', models: [] }
                 }
               }));
             } else if (message.type === 'tool-result') {
@@ -1158,9 +1183,15 @@ try {
   // detects which providers are installed and signed in, and offers only those.
   await page.getByRole('button', { name: 'Inkjet panel' }).click();
   await page.getByRole('button', { name: 'Start session' }).waitFor({ state: 'visible' });
-  assert.equal(await page.locator('.inkjet-setup__providers label').count(), 1, 'only detected providers are offered (unavailable ones are hidden)');
-  assert.match(await page.locator('.inkjet-setup__providers label').innerText(), /Claude/, 'the available provider is listed');
-  assert.equal(await page.locator('.inkjet-setup__providers input').isChecked(), true, 'a single available provider is preselected');
+  assert.match(await page.locator('.inkjet-setup__intro').innerText(), /built-in AI agent/i, 'the setup screen introduces Inkjet above the provider list');
+  assert.equal(await page.locator('.inkjet-setup__providers label').count(), 3, 'every provider is listed, available or not');
+  assert.equal(await page.locator('.inkjet-setup__providers input:disabled').count(), 2, 'unavailable providers are disabled');
+  assert.ok(
+    Number(await page.locator('.inkjet-setup__providers label.is-unavailable').first().evaluate((element) => getComputedStyle(element).opacity)) < 0.6,
+    'unavailable providers render greyed out'
+  );
+  assert.match(await page.locator('.inkjet-setup__providers label:not(.is-unavailable)').innerText(), /Claude/, 'the available provider stays enabled');
+  assert.equal(await page.locator('.inkjet-setup__providers input:not(:disabled)').isChecked(), true, 'the single available provider is preselected');
   await page.getByLabel('Inkjet model').selectOption('sonnet');
   await page.getByRole('button', { name: 'Start session' }).click();
   await page.getByLabel('Inkjet prompt').waitFor({ state: 'visible' });
@@ -1202,12 +1233,36 @@ try {
     document.querySelector('.workspace--agent-locked') &&
     [...document.querySelectorAll('.text-block')].some((element) => element.textContent.includes('The agent'))
   );
+  // Mid-turn, the process note types into the ephemeral thinking bubble while
+  // no persisted answer card exists yet (text reveals as a typewriter, so wait
+  // for the full phrase rather than sampling once).
+  await page.waitForFunction(() =>
+    document.querySelector('.workspace--agent-locked') &&
+    (document.querySelector('.inkjet-entry--thinking')?.textContent ?? '').includes('Planning a short report page') &&
+    document.querySelectorAll('.inkjet-entry--agent').length === 0
+  );
+  // The answer card reveals as a fast typewriter: it must be observable with
+  // partial text before the full answer is on screen.
+  await page.waitForFunction(() => {
+    const card = document.querySelector('.inkjet-entry--agent');
+    return card && card.textContent.length > 0 && !card.textContent.includes('streaming the text');
+  });
   await page.locator('.workspace--agent-locked').waitFor({ state: 'detached' });
+  await page.waitForFunction(() =>
+    (document.querySelector('.inkjet-entry--agent')?.textContent ?? '').includes('streaming the text')
+  );
+  assert.equal(await page.locator('.inkjet-entry--thinking').count(), 0, 'the process bubble is replaced when the final answer lands');
   const agentMockLog = await page.evaluate(() => window.__inktileAgentMockState.log);
   assert.equal(agentMockLog.error, null, `the mocked agent turn completed without protocol errors: ${agentMockLog.error}`);
   assert.equal(agentMockLog.opFailure, null, `every full-control op succeeded: ${agentMockLog.opFailure}`);
   assert.equal(agentMockLog.model, 'sonnet', 'the prompt carries the model chosen at session start');
   assert.equal(agentMockLog.staleRejected, true, 'a write against a stale revision is rejected with a revision error');
+  // Pixel geometry: the snapshot reports real sizes and media rows auto-fit their aspect.
+  const imageSizing = agentMockLog.imageSizing;
+  assert.ok(imageSizing && imageSizing.pageWidth > 0, 'read_document reports the document pageWidth');
+  assert.equal(imageSizing.widthPx, imageSizing.pageWidth, 'a full-row tile reports the document width as its rendered width');
+  assert.equal(imageSizing.asset, '200x100', 'read_document reports intrinsic media dimensions');
+  assert.equal(imageSizing.height, Math.round(imageSizing.pageWidth / 2), 'an inserted image auto-sizes its row to the media aspect ratio');
   // Text + drawing + audio pages remain; the versions page was inserted, reworked, then deleted.
   assert.equal(await page.locator('.page-wrapper').count(), pagesBeforeAgentTurn + 3, 'the turn added a text, a drawing, and an audio page');
   assert.equal(await page.locator('.variant-block').count(), versionsBeforeAgentTurn, 'the versions page the agent created and deleted is gone');
@@ -1229,11 +1284,11 @@ try {
   assert.equal(audioProbe.type, 'audio/wav', 'the audio asset keeps the true MIME of its bytes');
   assert.ok(audioProbe.size > 0, 'the audio asset carries its bytes');
   assert.equal(await page.locator('.text-block').first().getAttribute('contenteditable'), 'true', 'ending the turn returns the document to the user');
-  assert.match(await page.locator('.inkjet-entry--agent').first().innerText(), /report/i, 'the panel shows the streamed narration');
-  // Narration renders as markdown (React elements, no raw HTML injection).
+  assert.match(await page.locator('.inkjet-entry--agent').first().innerText(), /report/i, 'the panel shows the final answer as a persisted card');
+  // The answer renders as markdown (React elements, no raw HTML injection).
   const agentBubble = page.locator('.inkjet-entry--agent').first();
-  assert.equal(await agentBubble.locator('strong').innerText(), 'short report', 'agent narration renders markdown bold');
-  assert.equal(await agentBubble.locator('ul li').count(), 2, 'agent narration renders markdown lists');
+  assert.equal(await agentBubble.locator('strong').innerText(), 'short report', 'the answer renders markdown bold');
+  assert.equal(await agentBubble.locator('ul li').count(), 2, 'the answer renders markdown lists');
   // The transcript uses the shared overlay scrollbar instead of the native one.
   assert.equal(
     await page.locator('.inkjet-panel__transcript').evaluate((element) => getComputedStyle(element).scrollbarWidth),
@@ -1267,7 +1322,10 @@ try {
   // The agent's reasoning streams as a temporary, visually distinct thinking
   // bubble (dashed frame, unlike a finished message's solid card).
   await page.locator('.inkjet-entry--thinking').waitFor({ state: 'visible' });
-  assert.match(await page.locator('.inkjet-entry--thinking').innerText(), /Planning the slow drip/i, 'the panel streams the agent reasoning as thinking text');
+  // The reasoning types out gradually; wait for the whole phrase to reveal.
+  await page.waitForFunction(() =>
+    (document.querySelector('.inkjet-entry--thinking')?.textContent ?? '').includes('Planning the slow drip, one word at a time…')
+  );
   assert.equal(
     await page.locator('.inkjet-entry--thinking').evaluate((element) => getComputedStyle(element).borderTopStyle),
     'dashed',

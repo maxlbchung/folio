@@ -1,6 +1,7 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { uuid } from "../document/factories";
 import type { VariantGroupBlock } from "../document/types";
+import { stripCaretArtifacts } from "../utils/editorHtml";
 import { ChevronUp, ChevronDown, MinusIcon, PlusIcon, TextIcon } from "./icons";
 
 interface Props {
@@ -14,6 +15,8 @@ export function VariantBlockView({ block, onChange, onStartChange, onConvertToTe
   const active = block.variants[block.activeVariant];
   const editorRef = useRef<HTMLDivElement>(null);
   const editStarted = useRef(false);
+  // Spellcheck only while editing, mirroring TextBlockView: idle tiles show no squiggles.
+  const [focused, setFocused] = useState(false);
 
   useLayoutEffect(() => {
     if (editorRef.current && editorRef.current.innerHTML !== active.html && document.activeElement !== editorRef.current) {
@@ -48,11 +51,20 @@ export function VariantBlockView({ block, onChange, onStartChange, onConvertToTe
           className="variant-editor"
           contentEditable
           suppressContentEditableWarning
+          spellCheck={focused}
           data-placeholder={`Write version ${block.activeVariant + 1}…`}
-          onFocus={() => { editStarted.current = false; }}
+          onFocus={() => { setFocused(true); editStarted.current = false; }}
+          onBlur={(event) => {
+            setFocused(false);
+            // Scrub caret anchors from the live DOM once editing ends (stored HTML is
+            // already stripped on every input, so no rewrite would happen otherwise).
+            const value = stripCaretArtifacts(event.currentTarget.innerHTML);
+            if (event.currentTarget.innerHTML !== value) event.currentTarget.innerHTML = value;
+          }}
           onInput={(event) => {
             if (!editStarted.current) { onStartChange(); editStarted.current = true; }
-            const variants = block.variants.map((variant, index) => index === block.activeVariant ? { ...variant, html: event.currentTarget.innerHTML } : variant);
+            const html = stripCaretArtifacts(event.currentTarget.innerHTML);
+            const variants = block.variants.map((variant, index) => index === block.activeVariant ? { ...variant, html } : variant);
             onChange({ ...block, variants }, false);
           }}
         />

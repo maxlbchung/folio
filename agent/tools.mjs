@@ -344,7 +344,7 @@ const variantsSchema = {
 export const inktileTools = [
   {
     name: "read_document",
-    description: "Read the open inktile: title, page rows (the visual layout, up to 4 pages side by side per row), and every page's component, current HTML, notes, row height, width fraction, vertical alignment, versions (all drafts + active index), and drawing stroke counts. Call it before working — unless your instructions say the document is unchanged since your last turn — and again whenever an edit is rejected because the document changed.",
+    description: "Read the open inktile: title, pageWidth (the fixed pixel width every row spans), page rows (the visual layout, up to 4 pages side by side per row), and every page's component, current HTML, notes, row height in px, rendered tile width in px (widthPx), width fraction, vertical alignment, versions (all drafts + active index), drawing stroke counts, and each image/video's intrinsic width/height in px. Call it before working — unless your instructions say the document is unchanged since your last turn — and again whenever an edit is rejected because the document changed.",
     annotations: READ,
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: async ({ document }) => {
@@ -420,7 +420,7 @@ export const inktileTools = [
   },
   {
     name: "create_image",
-    description: "Author an SVG illustration and insert it as an image page after the given page (or at the end). Provide a complete standalone <svg> document with width/height or viewBox. Scripts, event handlers, and external references are stripped.",
+    description: "Author an SVG illustration and insert it as an image page after the given page (or at the end). Provide a complete standalone <svg> document with explicit width/height so the new row can auto-size to its aspect ratio. Scripts, event handlers, and external references are stripped.",
     annotations: WRITE,
     inputSchema: {
       type: "object",
@@ -442,7 +442,7 @@ export const inktileTools = [
   },
   {
     name: "fetch_media",
-    description: "Download an image, video, or audio file from a URL and insert it as a media page after the given page (or at the end). The download is validated against the app's accepted formats and a size cap. Use this for every binary download; web research tools are for reading pages only.",
+    description: "Download an image, video, or audio file from a URL and insert it as a media page after the given page (or at the end). Image and video rows auto-size to the media's aspect ratio on insert. The download is validated against the app's accepted formats and a size cap. Use this for every binary download; web research tools are for reading pages only.",
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     inputSchema: {
       type: "object",
@@ -510,7 +510,7 @@ export const inktileTools = [
   },
   {
     name: "set_row_height",
-    description: "Resize a row: sets the shared height (in px, 96-1600) of the row containing the given page. All pages in a row share one height; media and drawings fill it.",
+    description: "Resize a row: sets the shared height (in px, 96-1600) of the row containing the given page. All pages in a row share one height; media and drawings fill it. To show an image or video without dead space, set the height to about the tile's widthPx × asset height ÷ asset width.",
     annotations: WRITE,
     inputSchema: {
       type: "object",

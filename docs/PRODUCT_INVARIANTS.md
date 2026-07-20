@@ -52,9 +52,14 @@ These rules capture deliberate product decisions. Treat them as acceptance crite
 - Text and version pages use minimal, matched top and bottom spacing.
 - Font controls default to Arial and Normal; do not add blank placeholder options.
 - Support horizontal text alignment and page-level vertical anchoring. New pages anchor text to the top; middle and bottom stay selectable per page.
-- Formatting controls remain in the top header and include bold, italic, underline, strikethrough, alignment, and reset behavior.
-- Formatting controls reflect the current selection: the font and size dropdowns follow the caret's tile (so switching tiles updates them), and the bold, italic, underline, strikethrough, and alignment buttons show an active state while that style is in effect.
+- Formatting controls remain in the top header and include bold, italic, underline, strikethrough, subscript, superscript, text color, highlight color, bulleted and numbered lists, alignment, and reset behavior.
+- Formatting controls reflect the current selection: the font and size dropdowns follow the caret's tile (so switching tiles updates them), and the style buttons show an active state while that style is in effect.
 - The Ctrl+B / Ctrl+I / Ctrl+U shortcuts run through the same command path as the toolbar buttons, so toggling a style at a collapsed caret updates its highlight immediately rather than lagging until the next keystroke.
+- Toggling subscript/superscript at a collapsed caret raises or lowers the caret immediately, before any typing; the invisible caret anchors this requires never reach stored or exported HTML.
+- Spellcheck squiggles appear only in the tile currently being edited; tiles show no spelling markers once they lose focus.
+- Documents store text and highlight colors as their canonical light-theme values, so archives are theme-independent and PDF/print output (rendered on white) needs no mapping.
+- In dark mode, only greyscale text colors mirror (black renders as white, greys flip lightness); hue colors render identically in both themes. This is the intended contract, not an omission.
+- Pale highlights keep their color in dark mode, and a highlighted run renders as a light-mode island (default text inside goes dark, mirrored greys keep their light value) so it stays readable and looks the same in both themes; the grey highlight mirrors like greyscale text does.
 
 ## Drawing behavior
 

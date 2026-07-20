@@ -27,6 +27,12 @@ interface ActiveTransport {
   close: () => void;
 }
 
+/** Whether this build can run Inkjet at all: the desktop shell (or the test
+ * mock) provides a broker transport; a plain browser tab has none, and the
+ * panel shows a desktop-only note instead of attempting to connect. */
+export const agentSupportedHere = (): boolean =>
+  Boolean(window.__inktileAgentMock || window.__TAURI_INTERNALS__);
+
 /**
  * Connects the app to the agent broker. Zero setup: in the desktop shell a
  * `agent_start` command spawns agent/broker.mjs on demand and bridges its
