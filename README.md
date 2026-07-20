@@ -1,7 +1,7 @@
 <div align="center">
   <img src="inktile-logo-and-title.png" alt="Inktile — Build ideas tile by tile." width="450">
 
-  Notes, drafts, references, and media in flexible documents that stay on your machine.
+  A modular document editor where text, drafts, drawings, and media live together as cells — and stay on your machine.
 
   <p>
     <a href="https://github.com/maxlbchung/inktile"><img src="https://img.shields.io/github/stars/maxlbchung/inktile?style=flat-square&logo=github&label=stars&color=1f5c52" alt="GitHub stars"></a>
@@ -13,8 +13,8 @@
 
   <p>
     <a href="#quick-start">Get started</a> ·
-    <a href="#what-makes-inktile-different">Why Inktile</a> ·
-    <a href="#inkjet-the-built-in-agent">Inkjet</a> ·
+    <a href="#elevator-pitch">Why Inktile</a> ·
+    <a href="#inkjet-the-agent-runner">Inkjet</a> ·
     <a href="#commands">Commands</a>
   </p>
 </div>
@@ -29,24 +29,26 @@
 
 Inktile is a modular document editor, where you arrange cells with various content types. It functions as a freeform document canvas enabling more creative layouts and designs, while still retaining the classic document shape for more traditional document work.
 
-Inkjet, Inktiles agent-runner, allows you to use your existing coding agent CLIs through the application, exposing them to documentation and MCP tools. This means zero setup on Inktile's side: no API keys, no ports, no MCP wiring.
+Inkjet, Inktile's agent-runner, allows you to use your existing coding agent CLIs through the application, exposing the open document to them as MCP tools. This means zero setup on Inktile's side: no API keys, no ports, no MCP wiring.
 
 ## Features
 
-- **Notes and writing** with rich text, emphasis, underline, strikethrough, alignment, and vertical anchoring
+- **A grid document canvas** — a document is rows of up to four cells side by side, each cell holding one thing (text, a version set, a drawing, or media), so different kinds of material live together in one inktile
+- **Notes and writing** with rich text, emphasis, underline, strikethrough, alignment, and vertical anchoring — plus checklists, tables, LaTeX math (KaTeX), and markdown-style shortcuts (`- `, `1. `, `[] `, `# `, `---`)
 - **Version pages** for comparing drafts, tracking progress, and converting a version to plain text
 - **Vector drawing** with pen, highlighter, eraser, undo, clear, and theme-reactive colors
 - **Media pages** that detect supported image, video, and audio files in one action
-- **Page composition** with pointer-based ordering, side-by-side grouping, and shared row resizing
-- **A personal knowledge library** for creating, importing, reopening, renaming, pinning, duplicating, deleting, sorting, and searching inktiles
-- **Inkjet, the built-in AI agent** (desktop app) that writes, draws, and arranges tiles in the open inktile — [how it works](#inkjet-the-built-in-agent)
+- **Freeform layout** with pointer-based ordering, side-by-side grouping, shared row resizing, and column width splits
+- **A personal library** for creating, importing, reopening, renaming, pinning, duplicating, deleting, sorting, and searching inktiles
+- **Inkjet owns your CLI** (desktop app) — it detects the coding-agent CLIs already installed and signed in (Claude Code, Codex, OpenCode), spawns them headless, supervises each turn, and sandboxes them to web research and this one document: zero setup, no API keys, no ports, no MCP wiring
+- **Inkjet edits the open document live** — text streams in as it's written; it creates, arranges, and deletes tiles, keeps notes on tile backs, and draws stroke by stroke; and the whole turn reverts with a single Ctrl+Z — [how it works](#inkjet-the-agent-runner)
 - **Portable `.inktile` archives** with a manifest and separate binary assets
 - **Export** from the toolbar as an `.inktile` archive, a PDF through the system print dialog, or a plain-text `.txt` that keeps every tile's text, all versions, and notes
 - **Browser and Windows desktop modes** backed by the same React editor
 
-## Inkjet, the built-in agent
+## Inkjet, the agent-runner
 
-Inkjet is the writing agent that lives inside the desktop app — it's the panel drawing the flower in the screenshot above. Open it and Inktile detects the AI CLIs already installed and signed in on your machine (Claude Code, Codex, OpenCode). No API keys, no accounts, no configuration: pick a provider, pick a model, start a session, and ask for what you want.
+Inkjet is the agent-runner that lives inside the desktop app — it's the panel drawing the flower in the screenshot above. Open it and Inktile detects the AI CLIs already installed and signed in on your machine (Claude Code, Codex, OpenCode). No API keys, no accounts, no configuration: pick a provider, pick a model, start a session, and ask for what you want.
 
 **It edits the document you're looking at.** Inkjet has full control of the open inktile: it writes and edits text in small chunks that render as they arrive, creates, arranges, and deletes tiles, keeps notes on tile backs, manages version pages, authors drawings stroke by stroke, and adds SVG illustrations or media found while researching on the web.
 
