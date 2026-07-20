@@ -558,7 +558,7 @@ export function InktileHome({
     <main className="library" aria-busy={loading}>
       <header className="library-header">
         <a className="inktile-wordmark" href="#library" aria-label="Inktile library">
-          <img src="/inktile-logo.png" alt="" aria-hidden="true" />
+          <img src="./inktile-logo.png" alt="" aria-hidden="true" />
           <strong>Inktile</strong>
         </a>
         <div className="library-header__actions">

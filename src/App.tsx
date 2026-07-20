@@ -284,7 +284,7 @@ function EditorApp() {
   return (
     <div className={`app-shell app-shell--${view}`}>
       {!libraryReady ? (
-        <div className="library-boot" role="status"><img src="/inktile-logo.png" alt="" aria-hidden="true" /><p>Opening Inktile…</p></div>
+        <div className="library-boot" role="status"><img src="./inktile-logo.png" alt="" aria-hidden="true" /><p>Opening Inktile…</p></div>
       ) : view === "library" ? (
         <>
           <InktileHome
