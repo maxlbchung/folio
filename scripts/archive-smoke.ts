@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
 import { createDocument, createPage, normalizeDocumentPages, uuid } from "../src/document/factories";
-import { decodeFolio, encodeFolio } from "../src/persistence/folioArchive";
-import { FOLIO_DB_VERSION, LIBRARY_INDEX_STORE } from "../src/persistence/database";
+import { decodeInktile, encodeInktile } from "../src/persistence/inktileArchive";
+import { INKTILE_DB_VERSION, LIBRARY_INDEX_STORE } from "../src/persistence/database";
+import { resolveSaveAction } from "../src/persistence/fileSystem";
 import type { AssetMetadata, RuntimeAssetMap } from "../src/document/types";
 
 const document = createDocument();
-assert.equal(FOLIO_DB_VERSION, 3, "library payload/index separation uses database schema version 3");
+assert.equal("theme" in document.settings, false, "appearance preferences stay outside the document archive");
+assert.equal(resolveSaveAction(true, "C:\\Inktiles\\existing.inktile"), "overwrite", "native Save overwrites its current path");
+assert.equal(resolveSaveAction(true, null), "library", "native Save without an external path keeps the existing library record");
+assert.equal(resolveSaveAction(true, null, true), "save-as", "native Save As is the only path-choosing action");
+assert.equal(resolveSaveAction(false, null), "library", "browser Save updates the local library without creating a file");
+assert.equal(resolveSaveAction(false, null, true), "download", "browser export is the only download-creating action");
+assert.equal(INKTILE_DB_VERSION, 3, "library payload/index separation uses database schema version 3");
 assert.equal(LIBRARY_INDEX_STORE, "library-index", "library metadata has a dedicated lightweight store");
 const firstPage = createPage();
 const secondPage = createPage("drawing");
@@ -20,7 +27,7 @@ document.pageRows.push([firstPage.id, secondPage.id]);
 document.title = "Archive smoke test";
 
 const assetId = uuid();
-const blob = new Blob(["folio asset payload"], { type: "text/plain" });
+const blob = new Blob(["inktile asset payload"], { type: "text/plain" });
 const metadata: AssetMetadata = {
   id: assetId,
   filename: "sample.txt",
@@ -34,15 +41,15 @@ const assets: RuntimeAssetMap = {
   [assetId]: { metadata, blob, url: URL.createObjectURL(blob) }
 };
 
-const archive = await encodeFolio(document, assets);
+const archive = await encodeInktile(document, assets);
 assert.ok(archive.size > blob.size, "archive should contain the manifest and asset");
 assert.strictEqual(
-  await encodeFolio(document, assets),
+  await encodeInktile(document, assets),
   archive,
   "unchanged document and asset state reuses one encoded archive across persistence targets"
 );
-const restored = await decodeFolio(archive);
-assert.equal(restored.document.format, "com.folio.document");
+const restored = await decodeInktile(archive);
+assert.equal(restored.document.format, "com.inktile.document");
 assert.equal(restored.document.formatVersion, 1);
 assert.equal(restored.document.title, "Archive smoke test");
 assert.equal(restored.document.pageOrder.length, 2);
@@ -50,7 +57,7 @@ assert.deepEqual(restored.document.pageRows, [[firstPage.id, secondPage.id]]);
 assert.equal(restored.document.pages[firstPage.id].layoutHeight, 420);
 assert.equal(restored.document.pages[firstPage.id].layoutWidthFraction, 0.62);
 assert.equal(restored.document.pages[secondPage.id].layoutWidthFraction, 0.38);
-assert.equal(await restored.assets[assetId].blob.text(), "folio asset payload");
+assert.equal(await restored.assets[assetId].blob.text(), "inktile asset payload");
 
 // A valid custom split survives normalization unchanged.
 const normalizedCustom = normalizeDocumentPages(restored.document);
@@ -80,8 +87,8 @@ legacyMedia.pageOrder.push(legacyMediaPage.id);
 legacyMedia.pageRows.push([legacyMediaPage.id]);
 const normalizedMedia = normalizeDocumentPages(legacyMedia);
 assert.equal(normalizedMedia.pages[legacyMediaPage.id].layoutHeight, 360, "legacy media height seeds layoutHeight");
-const mediaArchive = await encodeFolio(normalizedMedia, {});
-const restoredMedia = await decodeFolio(mediaArchive);
+const mediaArchive = await encodeInktile(normalizedMedia, {});
+const restoredMedia = await decodeInktile(mediaArchive);
 assert.equal(restoredMedia.document.pages[legacyMediaPage.id].layoutHeight, 360, "round trip preserves the media page height");
 
 // An invalid custom split (does not sum to 1) is reset to the equal-split default.

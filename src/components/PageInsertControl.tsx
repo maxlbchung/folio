@@ -1,34 +1,12 @@
 import { useRef, useState } from "react";
 import { useDocument } from "../document/DocumentContext";
 import { createVariantBlock, uuid } from "../document/factories";
+import { detectMediaPageType } from "../document/mediaTypes";
 import { PlusIcon } from "./icons";
 
 interface Props {
   afterPageId?: string;
 }
-
-type MediaPageType = "image" | "video" | "audio";
-
-const mediaExtensions: Record<MediaPageType, Set<string>> = {
-  image: new Set(["avif", "bmp", "gif", "jpeg", "jpg", "png", "svg", "webp"]),
-  video: new Set(["m4v", "mov", "mp4", "ogv", "webm"]),
-  audio: new Set(["aac", "flac", "m4a", "mp3", "ogg", "opus", "wav"])
-};
-
-const mediaMimeTypes: Record<MediaPageType, Set<string>> = {
-  image: new Set(["image/avif", "image/bmp", "image/gif", "image/jpeg", "image/png", "image/svg+xml", "image/webp"]),
-  video: new Set(["video/mp4", "video/ogg", "video/quicktime", "video/webm"]),
-  audio: new Set(["audio/aac", "audio/flac", "audio/m4a", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/opus", "audio/wav", "audio/webm", "audio/x-m4a", "audio/x-wav"])
-};
-
-const detectMediaType = (file: File): MediaPageType | null => {
-  const mime = file.type.toLowerCase();
-  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-  const types = Object.keys(mediaExtensions) as MediaPageType[];
-  return types.find((type) => mediaMimeTypes[type].has(mime))
-    ?? types.find((type) => mediaExtensions[type].has(extension))
-    ?? null;
-};
 
 export function PageInsertControl({ afterPageId }: Props) {
   const { addPage, addBlockPage, addAsset } = useDocument();
@@ -43,7 +21,7 @@ export function PageInsertControl({ afterPageId }: Props) {
 
   const addMedia = async (file: File | undefined) => {
     if (!file) return;
-    const type = detectMediaType(file);
+    const type = detectMediaPageType(file.type, file.name);
     if (!type) {
       setMediaError(`“${file.name}” is not a supported media format yet. Choose an image, video, or audio file.`);
       return;
@@ -62,7 +40,7 @@ export function PageInsertControl({ afterPageId }: Props) {
   return (
     <div className="page-insert">
       <button className="page-insert__trigger" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
-        <PlusIcon size={14} /> Add page
+        <PlusIcon size={14} /> Add tile
       </button>
       {open && (
         <div className="page-insert__menu">

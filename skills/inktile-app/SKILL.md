@@ -1,9 +1,9 @@
 ---
-name: folio-app
-description: Build, debug, extend, validate, and release the Folio React/Vite/Tauri local-first document editor. Use for Folio page layout, dragging, grouped rows, resizing, text or version editing, drawing, media, themes, `.folio` persistence, autosave, desktop packaging, project documentation, or future-agent handoff work.
+name: inktile-app
+description: Build, debug, extend, validate, and release the Inktile React/Vite/Tauri local-first document editor. Use for Inktile page layout, dragging, grouped rows, resizing, text or version editing, drawing, media, themes, the home library, export, `.inktile` persistence, autosave, the Inkjet agent panel and broker, desktop packaging, project documentation, or future-agent handoff work.
 ---
 
-# Folio app
+# Inktile app
 
 ## Orient
 
@@ -27,6 +27,9 @@ Route work by responsibility:
 - Use the component-specific renderer for text, versions, drawing, or media behavior.
 - Treat `src/styles/app.css` as part of the geometry contract, not cosmetic cleanup.
 - Keep browser/native differences inside `src/persistence/fileSystem.ts` or the Tauri boundary.
+- Keep the home library (cards, pinning, duplication, search, settings) in `src/components/InktileHome.tsx`, with catalog persistence in `src/persistence/library.ts` and device preferences in `src/persistence/preferences.ts`.
+- Keep export in `src/persistence/exportDocument.ts` with its format picker in `src/components/ExportDialog.tsx`.
+- Keep Inkjet's typed protocol and op application in `src/agent/`, its panel in `src/components/InkjetPanel.tsx`, and the broker that drives the Claude Code and Codex CLIs in `agent/*.mjs` — dependency-free plain Node with its own `npm run check:agent` typecheck; the app is the only writer, so document mutations stay in `DocumentContext`.
 
 Maintain `pageRows` as canonical and synchronize `pageOrder`. Preserve one component per page, a four-column maximum, constant document width, equal grouped height with default-equal (but draggable) grouped widths, external control rails, content-aware minimum heights, and empty placeholder-only defaults.
 
@@ -47,6 +50,7 @@ Run the narrowest sufficient commands:
 ```text
 docs only                 npm run check:docs
 logic or persistence      npm run check
+broker or src/agent       npm run check:agent (also part of npm run check)
 UI interaction            npm run check, then npm run test:ui
 desktop shipping change   npm run release:desktop
 ```

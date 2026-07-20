@@ -1,6 +1,6 @@
-import { decodeFolio, encodeFolio, type LoadedFolio } from "./folioArchive";
-import type { FolioDocument, RuntimeAssetMap } from "../document/types";
-import { AUTOSAVE_STORE, openFolioDb } from "./database";
+import { decodeInktile, encodeInktile, type LoadedInktile } from "./inktileArchive";
+import type { InktileDocument, RuntimeAssetMap } from "../document/types";
+import { AUTOSAVE_STORE, openInktileDb } from "./database";
 
 const KEY = "current";
 
@@ -10,19 +10,19 @@ interface AutosaveRecord {
   recovery: boolean;
 }
 
-export interface LoadedAutosave extends LoadedFolio {
+export interface LoadedAutosave extends LoadedInktile {
   path: string | null;
   recovery: boolean;
 }
 
 export async function writeAutosave(
-  document: FolioDocument,
+  document: InktileDocument,
   assets: RuntimeAssetMap,
   path: string | null = null,
   recovery = true
 ): Promise<void> {
-  const db = await openFolioDb();
-  const blob = await encodeFolio(document, assets);
+  const db = await openInktileDb();
+  const blob = await encodeInktile(document, assets);
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(AUTOSAVE_STORE, "readwrite");
     transaction.objectStore(AUTOSAVE_STORE).put({ blob, path, recovery } satisfies AutosaveRecord, KEY);
@@ -33,7 +33,7 @@ export async function writeAutosave(
 }
 
 export async function readAutosave(): Promise<LoadedAutosave | null> {
-  const db = await openFolioDb();
+  const db = await openInktileDb();
   const stored = await new Promise<Blob | AutosaveRecord | undefined>((resolve, reject) => {
     const transaction = db.transaction(AUTOSAVE_STORE, "readonly");
     const request = transaction.objectStore(AUTOSAVE_STORE).get(KEY);
@@ -43,7 +43,7 @@ export async function readAutosave(): Promise<LoadedAutosave | null> {
   db.close();
   if (!stored) return null;
   const legacy = stored instanceof Blob;
-  const loaded = await decodeFolio(legacy ? stored : stored.blob);
+  const loaded = await decodeInktile(legacy ? stored : stored.blob);
   return {
     ...loaded,
     path: legacy ? null : stored.path,
@@ -52,7 +52,7 @@ export async function readAutosave(): Promise<LoadedAutosave | null> {
 }
 
 export async function deleteAutosave(): Promise<void> {
-  const db = await openFolioDb();
+  const db = await openInktileDb();
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(AUTOSAVE_STORE, "readwrite");
     transaction.objectStore(AUTOSAVE_STORE).delete(KEY);

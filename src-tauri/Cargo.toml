@@ -1,12 +1,12 @@
 [package]
-name = "folio"
+name = "inktile"
 version = "0.1.0"
 description = "A compact, local-first document editor"
-authors = ["Folio"]
+authors = ["Inktile"]
 edition = "2021"
 
 [lib]
-name = "folio_lib"
+name = "inktile_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]

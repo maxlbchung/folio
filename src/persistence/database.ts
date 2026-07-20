@@ -1,12 +1,12 @@
-export const FOLIO_DB_NAME = "folio-editor";
-export const FOLIO_DB_VERSION = 3;
+export const INKTILE_DB_NAME = "inktile-editor";
+export const INKTILE_DB_VERSION = 3;
 export const AUTOSAVE_STORE = "autosave";
 export const LIBRARY_STORE = "library";
 export const LIBRARY_INDEX_STORE = "library-index";
 
-export function openFolioDb(): Promise<IDBDatabase> {
+export function openInktileDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(FOLIO_DB_NAME, FOLIO_DB_VERSION);
+    const request = indexedDB.open(INKTILE_DB_NAME, INKTILE_DB_VERSION);
     request.onupgradeneeded = (event) => {
       const database = request.result;
       if (!database.objectStoreNames.contains(AUTOSAVE_STORE)) database.createObjectStore(AUTOSAVE_STORE);

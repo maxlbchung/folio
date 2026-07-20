@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  deleteLibraryFolio,
-  listLibraryFolios,
-  renameLibraryFolio,
-  searchLibraryFolios,
-  sortLibraryFolios,
+  deleteLibraryInktile,
+  listLibraryInktiles,
+  renameLibraryInktile,
+  searchLibraryInktiles,
+  sortLibraryInktiles,
   type LibraryEntry,
   type LibrarySort,
   type SortDirection
@@ -19,7 +19,7 @@ import {
   TrashIcon
 } from "./icons";
 
-interface FolioLibraryProps {
+interface InktileLibraryProps {
   refreshToken: number;
   onCreate: () => void;
   onOpen: (id: string) => Promise<void>;
@@ -53,7 +53,7 @@ const excerptForQuery = (entry: LibraryEntry, query: string): string => {
   return `${start ? "…" : ""}${entry.plainText.slice(start, end).trim()}${end < entry.plainText.length ? "…" : ""}`;
 };
 
-interface FolioCardProps {
+interface InktileCardProps {
   entry: LibraryEntry;
   frequency?: number;
   query: string;
@@ -67,9 +67,9 @@ interface FolioCardProps {
   onDelete: () => void;
 }
 
-function FolioCard({
+function InktileCard({
   entry, frequency, query, sort, editing, busy, onOpen, onEdit, onCancelEdit, onRename, onDelete
-}: FolioCardProps) {
+}: InktileCardProps) {
   const [draftTitle, setDraftTitle] = useState(entry.title);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -87,16 +87,16 @@ function FolioCard({
   const excerpt = excerptForQuery(entry, query);
 
   return (
-    <article className="folio-card" data-folio-id={entry.id}>
-      <span className="folio-card__edge" aria-hidden="true" />
-      <div className="folio-card__topline">
-        <span>{entry.pageCount} {entry.pageCount === 1 ? "page" : "pages"}</span>
-        {frequency !== undefined && <span className="folio-card__frequency">{frequency} {frequency === 1 ? "match" : "matches"}</span>}
+    <article className="inktile-card" data-inktile-id={entry.id}>
+      <span className="inktile-card__edge" aria-hidden="true" />
+      <div className="inktile-card__topline">
+        <span>{entry.pageCount} {entry.pageCount === 1 ? "tile" : "tiles"}</span>
+        {frequency !== undefined && <span className="inktile-card__frequency">{frequency} {frequency === 1 ? "match" : "matches"}</span>}
       </div>
 
       {editing ? (
-        <form className="folio-card__rename" onSubmit={(event) => { event.preventDefault(); commitRename(); }}>
-          <label className="sr-only" htmlFor={`rename-${entry.id}`}>Folio title</label>
+        <form className="inktile-card__rename" onSubmit={(event) => { event.preventDefault(); commitRename(); }}>
+          <label className="sr-only" htmlFor={`rename-${entry.id}`}>Inktile title</label>
           <input
             id={`rename-${entry.id}`}
             ref={inputRef}
@@ -111,15 +111,15 @@ function FolioCard({
           </div>
         </form>
       ) : (
-        <button className="folio-card__open" onClick={onOpen} disabled={busy} aria-label={`Open ${entry.title}`}>
+        <button className="inktile-card__open" onClick={onOpen} disabled={busy} aria-label={`Open ${entry.title}`}>
           <h2>{entry.title}</h2>
-          <p>{excerpt || "Empty folio — open it to add the first page."}</p>
+          <p>{excerpt || "Empty inktile — open it to add the first tile."}</p>
         </button>
       )}
 
-      <footer className="folio-card__footer">
+      <footer className="inktile-card__footer">
         <span>{dateLabel} {relativeDate(sortDate)}</span>
-        <div className="folio-card__actions">
+        <div className="inktile-card__actions">
           <button className="library-icon-button" onClick={onEdit} disabled={busy || editing} title={`Edit title for ${entry.title}`} aria-label={`Edit title for ${entry.title}`}><EditIcon size={14} /></button>
           <button className="library-icon-button library-icon-button--danger" onClick={onDelete} disabled={busy} title={`Delete ${entry.title}`} aria-label={`Delete ${entry.title}`}><TrashIcon size={14} /></button>
         </div>
@@ -128,7 +128,7 @@ function FolioCard({
   );
 }
 
-export function FolioLibrary({ refreshToken, onCreate, onOpen, onImport, onStatus }: FolioLibraryProps) {
+export function InktileLibrary({ refreshToken, onCreate, onOpen, onImport, onStatus }: InktileLibraryProps) {
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -139,16 +139,16 @@ export function FolioLibrary({ refreshToken, onCreate, onOpen, onImport, onStatu
   const [deleteTarget, setDeleteTarget] = useState<LibraryEntry | null>(null);
 
   const refresh = async () => {
-    setEntries(await listLibraryFolios());
+    setEntries(await listLibraryInktiles());
   };
 
   useEffect(() => {
     void refresh().catch(() => onStatus("Library could not be loaded")).finally(() => setLoading(false));
   }, [refreshToken]);
 
-  const sortedEntries = useMemo(() => sortLibraryFolios(entries, sort, direction), [entries, sort, direction]);
+  const sortedEntries = useMemo(() => sortLibraryInktiles(entries, sort, direction), [entries, sort, direction]);
   const searchResults = useMemo(
-    () => searchLibraryFolios(entries, query, sort, direction),
+    () => searchLibraryInktiles(entries, query, sort, direction),
     [entries, query, sort, direction]
   );
   const hasQuery = Boolean(query.trim());
@@ -159,7 +159,7 @@ export function FolioLibrary({ refreshToken, onCreate, onOpen, onImport, onStatu
     try {
       await onOpen(entry.id);
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Folio could not be opened");
+      onStatus(error instanceof Error ? error.message : "Inktile could not be opened");
       setBusyId(null);
     }
   };
@@ -167,7 +167,7 @@ export function FolioLibrary({ refreshToken, onCreate, onOpen, onImport, onStatu
   const renameEntry = async (entry: LibraryEntry, title: string) => {
     setBusyId(entry.id);
     try {
-      await renameLibraryFolio(entry.id, title);
+      await renameLibraryInktile(entry.id, title);
       await refresh();
       setEditingId(null);
       onStatus("Title updated");
@@ -182,19 +182,19 @@ export function FolioLibrary({ refreshToken, onCreate, onOpen, onImport, onStatu
     if (!deleteTarget) return;
     setBusyId(deleteTarget.id);
     try {
-      await deleteLibraryFolio(deleteTarget.id);
+      await deleteLibraryInktile(deleteTarget.id);
       await refresh();
       setDeleteTarget(null);
-      onStatus("Folio deleted from this library");
+      onStatus("Inktile deleted from this library");
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Folio could not be deleted");
+      onStatus(error instanceof Error ? error.message : "Inktile could not be deleted");
     } finally {
       setBusyId(null);
     }
   };
 
   const renderCard = (entry: LibraryEntry, frequency?: number) => (
-    <FolioCard
+    <InktileCard
       key={entry.id}
       entry={entry}
       frequency={frequency}
@@ -213,36 +213,36 @@ export function FolioLibrary({ refreshToken, onCreate, onOpen, onImport, onStatu
   return (
     <main className="library" aria-busy={loading}>
       <header className="library-header">
-        <a className="folio-wordmark" href="#library" aria-label="Folio library">
-          <span aria-hidden="true">F</span>
-          <strong>Folio</strong>
+        <a className="inktile-wordmark" href="#library" aria-label="Inktile library">
+          <img src="/inktile-logo.png" alt="" aria-hidden="true" />
+          <strong>Inktile</strong>
         </a>
         <div className="library-header__actions">
-          <button className="library-button library-button--secondary" onClick={() => void onImport()}><FolderIcon size={15} />Open .folio</button>
-          <button className="library-button library-button--primary" onClick={onCreate}><FileIcon size={15} />New folio</button>
+          <button className="library-button library-button--secondary" onClick={() => void onImport()}><FolderIcon size={15} />Open .inktile</button>
+          <button className="library-button library-button--primary" onClick={onCreate}><FileIcon size={15} />New inktile</button>
         </div>
       </header>
 
       <section className="library-intro" aria-labelledby="library-title">
         <div>
           <p className="library-eyebrow">Your working collection</p>
-          <h1 id="library-title">Every folio, ready to continue.</h1>
-          <p className="library-lede">Create, revisit, and search the words inside your locally stored folios.</p>
+          <h1 id="library-title">Every inktile, ready to continue.</h1>
+          <p className="library-lede">Create, revisit, and search the words inside your locally stored inktiles.</p>
         </div>
-        <span className="library-count"><strong>{entries.length}</strong>{entries.length === 1 ? "folio" : "folios"}</span>
+        <span className="library-count"><strong>{entries.length}</strong>{entries.length === 1 ? "inktile" : "inktiles"}</span>
       </section>
 
-      <section className="library-controls" aria-label="Find and arrange folios">
+      <section className="library-controls" aria-label="Find and arrange inktiles">
         <label className="library-search">
           <SearchIcon size={17} />
-          <span className="sr-only">Search folio titles and text</span>
+          <span className="sr-only">Search inktile titles and text</span>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Look up titles and text" />
           {hasQuery && <button onClick={() => setQuery("")} aria-label="Clear search">Clear</button>}
         </label>
         <div className="library-sort">
           <label>
             <span>View by</span>
-            <select value={sort} onChange={(event) => setSort(event.target.value as LibrarySort)} aria-label="View folios by">
+            <select value={sort} onChange={(event) => setSort(event.target.value as LibrarySort)} aria-label="View inktiles by">
               {SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
@@ -264,23 +264,23 @@ export function FolioLibrary({ refreshToken, onCreate, onOpen, onImport, onStatu
         <section className="library-empty">
           <div className="library-empty__pages" aria-hidden="true"><span /><span /><span /></div>
           <p className="library-eyebrow">The shelf is empty</p>
-          <h2>Start with a blank folio.</h2>
-          <p>New folios begin empty. Add text, versions, drawings, or media when you open one.</p>
-          <button className="library-button library-button--primary" onClick={onCreate}><FileIcon size={15} />Create your first folio</button>
+          <h2>Start with a blank inktile.</h2>
+          <p>New inktiles begin empty. Add text, versions, drawings, or media when you open one.</p>
+          <button className="library-button library-button--primary" onClick={onCreate}><FileIcon size={15} />Create your first inktile</button>
         </section>
       ) : hasQuery ? (
         <div className="library-results" aria-live="polite">
-          <p className="library-result-summary">{resultCount} {resultCount === 1 ? "folio" : "folios"} found for “{query.trim()}”</p>
+          <p className="library-result-summary">{resultCount} {resultCount === 1 ? "inktile" : "inktiles"} found for “{query.trim()}”</p>
           {searchResults.titleMatches.length > 0 && (
             <section className="library-result-group" aria-labelledby="title-match-heading">
               <div className="library-section-heading"><h2 id="title-match-heading">In titles</h2><span>{searchResults.titleMatches.length}</span></div>
-              <div className="folio-grid">{searchResults.titleMatches.map((entry) => renderCard(entry))}</div>
+              <div className="inktile-grid">{searchResults.titleMatches.map((entry) => renderCard(entry))}</div>
             </section>
           )}
           {searchResults.textMatches.length > 0 && (
             <section className="library-result-group" aria-labelledby="text-match-heading">
-              <div className="library-section-heading"><h2 id="text-match-heading">In folio text</h2><span>Most frequent first</span></div>
-              <div className="folio-grid">{searchResults.textMatches.map((entry) => renderCard(entry, entry.frequency))}</div>
+              <div className="library-section-heading"><h2 id="text-match-heading">In inktile text</h2><span>Most frequent first</span></div>
+              <div className="inktile-grid">{searchResults.textMatches.map((entry) => renderCard(entry, entry.frequency))}</div>
             </section>
           )}
           {resultCount === 0 && (
@@ -292,21 +292,21 @@ export function FolioLibrary({ refreshToken, onCreate, onOpen, onImport, onStatu
           )}
         </div>
       ) : (
-        <section className="library-result-group" aria-labelledby="all-folios-heading">
-          <div className="library-section-heading"><h2 id="all-folios-heading">All folios</h2><span>{SORT_OPTIONS.find((option) => option.value === sort)?.label}</span></div>
-          <div className="folio-grid">{sortedEntries.map((entry) => renderCard(entry))}</div>
+        <section className="library-result-group" aria-labelledby="all-inktiles-heading">
+          <div className="library-section-heading"><h2 id="all-inktiles-heading">All inktiles</h2><span>{SORT_OPTIONS.find((option) => option.value === sort)?.label}</span></div>
+          <div className="inktile-grid">{sortedEntries.map((entry) => renderCard(entry))}</div>
         </section>
       )}
 
       {deleteTarget && (
         <div className="library-dialog" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeleteTarget(null); }}>
-          <section className="library-dialog__panel" role="alertdialog" aria-modal="true" aria-labelledby="delete-folio-title" aria-describedby="delete-folio-description">
+          <section className="library-dialog__panel" role="alertdialog" aria-modal="true" aria-labelledby="delete-inktile-title" aria-describedby="delete-inktile-description">
             <p className="library-eyebrow">Remove from this device</p>
-            <h2 id="delete-folio-title">Delete “{deleteTarget.title}”?</h2>
-            <p id="delete-folio-description">This removes the folio from your local library. A separate .folio file saved elsewhere will not be deleted.</p>
+            <h2 id="delete-inktile-title">Delete “{deleteTarget.title}”?</h2>
+            <p id="delete-inktile-description">This removes the inktile from your local library. A separate .inktile file saved elsewhere will not be deleted.</p>
             <div>
               <button className="library-button library-button--secondary" onClick={() => setDeleteTarget(null)}>Cancel</button>
-              <button className="library-button library-button--danger" onClick={() => void confirmDelete()} disabled={busyId === deleteTarget.id}>Delete folio</button>
+              <button className="library-button library-button--danger" onClick={() => void confirmDelete()} disabled={busyId === deleteTarget.id}>Delete inktile</button>
             </div>
           </section>
         </div>

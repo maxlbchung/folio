@@ -1,8 +1,8 @@
 import type {
   Block,
   DrawingBlock,
-  FolioDocument,
-  FolioPage,
+  InktileDocument,
+  InktilePage,
   PageType,
   TextBlock,
   VariantGroupBlock
@@ -53,19 +53,19 @@ export const createVariantBlock = (): VariantGroupBlock => ({
   ]
 });
 
-export const createPage = (type: PageType = "standard", block?: Block): FolioPage => {
-  const page: FolioPage = {
+export const createPage = (type: PageType = "standard", block?: Block): InktilePage => {
+  const page: InktilePage = {
     id: uuid(),
     type,
     front: { blocks: type === "standard" ? [block ?? createTextBlock()] : [] },
     activeSide: "front",
-    verticalAlign: "center"
+    verticalAlign: "top"
   };
   if (type === "drawing") page.drawing = createDrawingBlock();
   return page;
 };
 
-export const createBlockPage = (block: Block): FolioPage => {
+export const createBlockPage = (block: Block): InktilePage => {
   if (block.type === "drawing") {
     const page = createPage("drawing");
     page.drawing = block;
@@ -77,17 +77,16 @@ export const createBlockPage = (block: Block): FolioPage => {
   return page;
 };
 
-export const createDocument = (): FolioDocument => {
+export const createDocument = (): InktileDocument => {
   const now = new Date().toISOString();
   return {
-    format: "com.folio.document",
+    format: "com.inktile.document",
     formatVersion: 1,
     id: uuid(),
-    title: "Untitled Folio",
+    title: "Untitled Inktile",
     createdAt: now,
     modifiedAt: now,
     settings: {
-      theme: "system",
       pageWidth: 760,
       contentPadding: 34
     },
@@ -99,14 +98,14 @@ export const createDocument = (): FolioDocument => {
 };
 
 /** Splits documents made by older builds into the one-component-per-page model. */
-export const normalizeDocumentPages = (source: FolioDocument): FolioDocument => {
+export const normalizeDocumentPages = (source: InktileDocument): InktileDocument => {
   const document = structuredClone(source);
   const pageOrder: string[] = [];
 
   for (const pageId of document.pageOrder) {
     const page = document.pages[pageId];
     if (!page) continue;
-    page.verticalAlign ??= "center";
+    page.verticalAlign ??= "top";
     // Older media pages sized themselves through the block's `height`. Seed the page's
     // shared `layoutHeight` from it so those documents keep their visual size.
     const mediaBlock = page.front.blocks[0];
@@ -160,7 +159,7 @@ export const normalizeDocumentPages = (source: FolioDocument): FolioDocument => 
   // single-page row keeps no meaningful fraction and any invalid or non-normalized
   // multi-page row is reset to the equal-split default by dropping the fields.
   for (const row of pageRows) {
-    const rowPages = row.map((pageId) => document.pages[pageId]).filter((page): page is FolioPage => Boolean(page));
+    const rowPages = row.map((pageId) => document.pages[pageId]).filter((page): page is InktilePage => Boolean(page));
     if (rowPages.length <= 1) {
       rowPages.forEach((page) => { delete page.layoutWidthFraction; });
       continue;
@@ -185,5 +184,17 @@ export const cloneBlock = (block: Block): Block => {
   if (copy.type === "drawing") {
     copy.strokes = copy.strokes.map((stroke) => ({ ...stroke, id: uuid() }));
   }
+  return copy;
+};
+
+/** Deep-copies a page with fresh page/block/stroke ids; asset references stay shared. */
+export const clonePage = (source: InktilePage, id = uuid()): InktilePage => {
+  const copy = structuredClone(source);
+  copy.id = id;
+  copy.front.blocks = copy.front.blocks.map(cloneBlock);
+  if (copy.back) copy.back.blocks = copy.back.blocks.map(cloneBlock);
+  if (copy.drawing) copy.drawing = cloneBlock(copy.drawing) as DrawingBlock;
+  // The copy lands in its own row, so it carries no shared-row width split.
+  delete copy.layoutWidthFraction;
   return copy;
 };

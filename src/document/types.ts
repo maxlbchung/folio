@@ -1,28 +1,26 @@
-export type ThemePreference = "system" | "light" | "dark";
 export type PageSide = "front" | "back";
 export type PageType = "standard" | "drawing";
 export type MediaFit = "contain" | "cover" | "stretch";
 export type VerticalAlignment = "top" | "center" | "bottom";
 
-export interface FolioDocument {
-  format: "com.folio.document";
+export interface InktileDocument {
+  format: "com.inktile.document";
   formatVersion: 1;
   id: string;
   title: string;
   createdAt: string;
   modifiedAt: string;
   settings: {
-    theme: ThemePreference;
     pageWidth: number;
     contentPadding: number;
   };
   pageOrder: string[];
   pageRows: string[][];
-  pages: Record<string, FolioPage>;
+  pages: Record<string, InktilePage>;
   assets: Record<string, AssetMetadata>;
 }
 
-export interface FolioPage {
+export interface InktilePage {
   id: string;
   type: PageType;
   front: PageFace;

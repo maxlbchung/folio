@@ -1,5 +1,20 @@
 node_modules
 dist
+dist-smoke
+dist-smoke-current
+agent/.codex-workspace
 src-tauri/target
 .DS_Store
-*.folio
+*.inktile
+.retired-brand/
+
+# Real git dir lives in .git-local (see repo setup); never commit it
+.git-local/
+
+# Build/release artifacts
+*.exe
+*.zip
+*.tsbuildinfo
+
+# Local tooling config
+.codex/

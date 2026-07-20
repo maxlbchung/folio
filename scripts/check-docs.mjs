@@ -10,8 +10,8 @@ const required = [
   "docs/FILE_FORMAT.md",
   "docs/PRODUCT_INVARIANTS.md",
   "docs/TESTING_AND_RELEASE.md",
-  "skills/folio-app/SKILL.md",
-  "skills/folio-app/agents/openai.yaml"
+  "skills/inktile-app/SKILL.md",
+  "skills/inktile-app/agents/openai.yaml"
 ];
 
 const failures = [];

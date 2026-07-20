@@ -4,9 +4,10 @@ import { createServer } from 'node:http';
 import { chromium } from 'playwright-core';
 import JSZip from 'jszip';
 
-const [script, styles] = await Promise.all([
-  readFile(new URL('../dist-smoke/app.js', import.meta.url), 'utf8'),
-  readFile(new URL('../dist-smoke/app.css', import.meta.url), 'utf8')
+const [script, styles, logo] = await Promise.all([
+  readFile(new URL('../dist-smoke-current/app.js', import.meta.url), 'utf8'),
+  readFile(new URL('../dist-smoke-current/app.css', import.meta.url), 'utf8'),
+  readFile(new URL('../public/inktile-logo.png', import.meta.url))
 ]);
 
 const smokeServer = createServer((request, response) => {
@@ -24,6 +25,11 @@ const smokeServer = createServer((request, response) => {
   if (request.url === '/app.css') {
     response.setHeader('Content-Type', 'text/css; charset=utf-8');
     response.end(styles);
+    return;
+  }
+  if (request.url === '/inktile-logo.png') {
+    response.setHeader('Content-Type', 'image/png');
+    response.end(logo);
     return;
   }
   response.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -54,12 +60,12 @@ try {
   await migrationSeedPage.goto(`${smokeUrl}migration-seed`);
   await migrationSeedPage.evaluate(async () => {
     await new Promise((resolve, reject) => {
-      const request = indexedDB.deleteDatabase('folio-editor');
+      const request = indexedDB.deleteDatabase('inktile-editor');
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
     const database = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('folio-editor', 2);
+      const request = indexedDB.open('inktile-editor', 2);
       request.onupgradeneeded = () => {
         request.result.createObjectStore('autosave');
         request.result.createObjectStore('library', { keyPath: 'id' });
@@ -103,59 +109,102 @@ try {
 
   await page.goto(smokeUrl);
   await page.locator('.library').waitFor({ state: 'visible' });
+  const inktileLogo = page.locator('.inktile-wordmark img[src="/inktile-logo.png"]');
+  await inktileLogo.waitFor({ state: 'visible' });
+  assert.equal(await inktileLogo.evaluate((image) => image.complete && image.naturalWidth > 0), true, 'Inktile wordmark logo loads');
   await page.getByLabel('Delete Version two fixture').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('.folio-card').count(), 1, 'database version 3 migrates version 2 library metadata into the lightweight index');
+  assert.equal(await page.locator('.inktile-card[data-inktile-id]').count(), 1, 'database version 3 migrates version 2 library metadata into the lightweight index');
   await page.getByLabel('Delete Version two fixture').click();
-  await page.getByRole('button', { name: 'Delete folio' }).click();
+  await page.getByRole('button', { name: 'Delete inktile' }).click();
   await page.getByText('The shelf is empty').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('.folio-card').count(), 0, 'starts on an empty folio library');
-  assert.equal(await page.getByRole('button', { name: 'New folio' }).count(), 1, 'home page offers a new folio action');
-  assert.equal(await page.getByRole('button', { name: 'Open .folio' }).count(), 1, 'home page offers an existing folio import action');
+  assert.equal(await page.locator('.inktile-card[data-inktile-id]').count(), 0, 'starts on an empty inktile library');
+  assert.equal(await page.getByRole('button', { name: 'Create your first inktile' }).count(), 1, 'the empty home page offers a create action');
+  assert.equal(await page.getByRole('button', { name: /^Open .inktile/ }).count(), 1, 'home page offers an existing inktile import action');
+  assert.equal(await page.getByRole('button', { name: 'Settings' }).count(), 1, 'home page offers application settings');
+  assert.equal(
+    await page.locator('html').evaluate((root) => getComputedStyle(root).scrollbarWidth),
+    'none',
+    'home hides the native scrollbar so the shared overlay workspace scrollbar owns library scrolling'
+  );
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
+  await settingsDialog.getByRole('radio', { name: 'Dark' }).check();
+  await settingsDialog.getByLabel('UI scale').selectOption('1.1');
+  assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark', 'home settings apply the selected theme');
+  assert.equal(await page.locator('html').evaluate((root) => root.style.getPropertyValue('--ui-scale')), '1.1', 'home settings apply the selected UI scale');
+  const scaledLayout = await page.evaluate(() => {
+    const shell = document.querySelector('.app-shell').getBoundingClientRect();
+    const library = document.querySelector('.library').getBoundingClientRect();
+    return {
+      viewport: window.innerWidth,
+      shellLeft: shell.left,
+      shellRight: shell.right,
+      libraryCenter: (library.left + library.right) / 2,
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth
+    };
+  });
+  assert.ok(
+    Math.abs(scaledLayout.shellLeft) <= 1 && Math.abs(scaledLayout.shellRight - scaledLayout.viewport) <= 1,
+    `UI scale keeps the shell filling the viewport width, got ${scaledLayout.shellLeft}..${scaledLayout.shellRight} of ${scaledLayout.viewport}`
+  );
+  assert.ok(
+    Math.abs(scaledLayout.libraryCenter - scaledLayout.viewport / 2) <= 2,
+    `UI scale keeps Home horizontally centered, got center ${scaledLayout.libraryCenter} of ${scaledLayout.viewport}`
+  );
+  assert.equal(scaledLayout.scrollWidth, scaledLayout.clientWidth, 'UI scale introduces no horizontal overflow');
+  await settingsDialog.getByRole('button', { name: 'Close settings' }).click();
+  await page.reload();
+  await page.locator('.library').waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: 'Settings' }).click();
+  assert.equal(await page.getByRole('dialog', { name: 'Settings' }).getByRole('radio', { name: 'Dark' }).isChecked(), true, 'theme persists across a full reload');
+  assert.equal(await page.getByRole('dialog', { name: 'Settings' }).getByLabel('UI scale').inputValue(), '1.1', 'UI scale persists across a full reload');
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('radio', { name: 'Light' }).check();
+  await page.getByRole('dialog', { name: 'Settings' }).getByLabel('UI scale').selectOption('1');
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Close settings' }).click();
 
   // Create two real local-library entries so title lookup, full-text frequency,
   // rename, reopen, ordering, and deletion are exercised before the editor suite.
-  await page.getByRole('button', { name: 'New folio' }).click();
+  await page.getByRole('button', { name: 'Create your first inktile' }).click();
   await page.locator('.page-insert__trigger').waitFor({ state: 'visible' });
   await page.locator('.document-title').fill('Research notes');
   await page.locator('.page-insert__trigger').click();
   await page.getByRole('button', { name: /^Text/ }).click();
   await page.locator('.text-block').click();
   await page.keyboard.type('signal signal signal');
-  await page.getByRole('button', { name: 'Back to folios' }).click();
-  await page.getByRole('button', { name: 'New folio' }).click();
+  await page.getByRole('button', { name: 'Back to inktiles' }).click();
+  await page.getByRole('button', { name: /^New inktile/ }).click();
   await page.locator('.document-title').fill('Signal brief');
-  await page.getByRole('button', { name: 'Back to folios' }).click();
-  await page.locator('.folio-card').first().waitFor({ state: 'visible' });
-  assert.equal(await page.locator('.folio-card').count(), 2, 'new folios persist on the home page');
+  await page.getByRole('button', { name: 'Back to inktiles' }).click();
+  await page.locator('.inktile-card[data-inktile-id]').first().waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.inktile-card[data-inktile-id]').count(), 2, 'new inktiles persist on the home page');
   assert.deepEqual(
-    await page.getByLabel('View folios by').locator('option').allTextContents(),
-    ['Last opened', 'Date created', 'Last edited', 'Title'],
-    'library exposes all requested view modes'
+    await page.getByLabel('View inktiles by').locator('option').allTextContents(),
+    ['Last opened', 'Date created', 'Last edited'],
+    'library exposes the date-based view modes without a title mode'
   );
 
   await page.getByPlaceholder('Look up titles and text').fill('signal');
-  const titleResults = page.getByRole('region', { name: 'In titles' });
-  const textResults = page.getByRole('region', { name: 'In folio text' });
-  assert.equal(await titleResults.locator('.folio-card').count(), 1, 'title matches appear in their own result group');
-  assert.match(await titleResults.locator('.folio-card').innerText(), /Signal brief/i, 'the title match is listed first');
-  assert.equal(await textResults.locator('.folio-card').count(), 1, 'text-only matches appear after title matches');
-  assert.match(await textResults.locator('.folio-card').innerText(), /3 matches/i, 'text results expose and sort by frequency');
-  const titleGroupBox = await titleResults.boundingBox();
-  const textGroupBox = await textResults.boundingBox();
-  assert.ok(titleGroupBox.y < textGroupBox.y, 'title results render above text results');
+  const lookupResults = page.getByRole('region', { name: 'Matches' });
+  assert.equal(await lookupResults.locator('.inktile-card[data-inktile-id]').count(), 2, 'title and text lookup matches share one result group');
+  assert.match(await lookupResults.locator('.inktile-card[data-inktile-id]').first().innerText(), /Signal brief/i, 'lookup initially follows the last-opened view mode');
+  assert.match(await lookupResults.locator('.inktile-card[data-inktile-id]').filter({ hasText: 'Research notes' }).innerText(), /3 matches/i, 'text lookup still exposes occurrence counts');
+  await page.getByLabel('View inktiles by').selectOption('createdAt');
   await page.getByRole('button', { name: 'Sort ascending' }).click();
   assert.equal(await page.getByRole('button', { name: 'Sort descending' }).count(), 1, 'library switches between descending and ascending');
+  assert.match(await lookupResults.locator('.inktile-card[data-inktile-id]').first().innerText(), /Research notes/i, 'keyword lookup reorders with the selected view mode and direction');
   await page.getByRole('button', { name: 'Clear search' }).click();
 
   await page.getByLabel('Edit title for Signal brief').click();
-  await page.getByLabel('Folio title', { exact: true }).fill('Beacon brief');
+  await page.getByLabel('Inktile title', { exact: true }).fill('Beacon brief');
   await page.getByRole('button', { name: 'Save title' }).click();
   await page.getByText('Title updated').waitFor({ state: 'visible' });
   await page.reload();
   await page.getByRole('button', { name: 'Open Research notes' }).waitFor({ state: 'visible' });
   await page.getByRole('button', { name: 'Open Research notes' }).click();
-  assert.equal((await page.locator('.text-block').innerText()).trim(), 'signal signal signal', 'a persisted library folio reopens after a full reload');
-  await page.getByRole('button', { name: 'Back to folios' }).click();
+  assert.equal((await page.locator('.text-block').innerText()).trim(), 'signal signal signal', 'a persisted library inktile reopens after a full reload');
+  await page.getByRole('button', { name: 'Back to inktiles' }).click();
   await page.getByRole('button', { name: 'Open Research notes' }).waitFor({ state: 'visible' });
   const cachedLibraryOpenChangedViewNextFrame = await page.getByRole('button', { name: 'Open Research notes' }).evaluate(async (button) => {
     button.click();
@@ -163,12 +212,12 @@ try {
     return Boolean(document.querySelector('.page-stack'));
   });
   assert.ok(cachedLibraryOpenChangedViewNextFrame, 'a cached library snapshot reopens by the next animation frame');
-  assert.equal((await page.locator('.text-block').innerText()).trim(), 'signal signal signal', 'a library folio reopens for editing with its text intact');
+  assert.equal((await page.locator('.text-block').innerText()).trim(), 'signal signal signal', 'a library inktile reopens for editing with its text intact');
 
   const cleanCycleDurations = [];
   for (let cycle = 0; cycle < 6; cycle += 1) {
     const startedAt = Date.now();
-    await page.getByRole('button', { name: 'Back to folios' }).click();
+    await page.getByRole('button', { name: 'Back to inktiles' }).click();
     await page.getByRole('button', { name: 'Open Research notes' }).waitFor({ state: 'visible' });
     await page.getByRole('button', { name: 'Open Research notes' }).click();
     await page.locator('.text-block').waitFor({ state: 'visible' });
@@ -178,20 +227,20 @@ try {
     cleanCycleDurations.every((duration) => duration < 750),
     `six clean Home/Open cycles stay responsive without accumulating work, got ${JSON.stringify(cleanCycleDurations)}ms`
   );
-  await page.getByRole('button', { name: 'Back to folios' }).click();
+  await page.getByRole('button', { name: 'Back to inktiles' }).click();
   await page.getByLabel('Delete Beacon brief').waitFor({ state: 'visible' });
   await page.getByLabel('Delete Beacon brief').click();
-  await page.getByRole('button', { name: 'Delete folio' }).click();
+  await page.getByRole('button', { name: 'Delete inktile' }).click();
   await page.getByLabel('Delete Research notes').waitFor({ state: 'visible' });
   await page.getByLabel('Delete Research notes').click();
-  await page.getByRole('button', { name: 'Delete folio' }).click();
+  await page.getByRole('button', { name: 'Delete inktile' }).click();
   await page.getByText('The shelf is empty').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('.folio-card').count(), 0, 'folio deletion removes local-library entries');
+  assert.equal(await page.locator('.inktile-card[data-inktile-id]').count(), 0, 'inktile deletion removes local-library entries');
   await page.reload();
   await page.getByText('The shelf is empty').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('.folio-card').count(), 0, 'a deleted autosaved folio stays deleted after restart');
+  assert.equal(await page.locator('.inktile-card[data-inktile-id]').count(), 0, 'a deleted autosaved inktile stays deleted after restart');
 
-  await page.getByRole('button', { name: 'New folio' }).click();
+  await page.getByRole('button', { name: 'Create your first inktile' }).click();
   await page.locator('.page-insert__trigger').waitFor({ state: 'visible' });
   assert.equal(await page.locator('.page-card').count(), 0, 'starts without prepopulated pages');
 
@@ -199,12 +248,18 @@ try {
   await page.getByRole('button', { name: /^Text/ }).click();
   assert.equal(await page.locator('.page-card').count(), 1, 'adds a text page');
   const textCardSpacing = await page.locator('.page-card').first().evaluate((element) => {
-    const style = getComputedStyle(element);
+    // Padding lives on the face (page front / notes back share one card), not the card.
+    const style = getComputedStyle(element.querySelector('.page-face--front'));
     return { top: parseFloat(style.paddingTop), bottom: parseFloat(style.paddingBottom), height: element.getBoundingClientRect().height };
   });
   assert.equal(textCardSpacing.top, textCardSpacing.bottom, 'text page top and bottom spacing match');
   assert.ok(textCardSpacing.bottom <= 17, 'text page vertical spacing is halved');
   assert.ok(textCardSpacing.height >= 90 && textCardSpacing.height < 100, 'text page minimum height fits the vertical page rail');
+  assert.equal(
+    await page.locator('.page-card').first().evaluate((element) => getComputedStyle(element.querySelector('.page-face--front')).justifyContent),
+    'flex-start',
+    'new tiles anchor text to the top by default'
+  );
 
   const titleBox = await page.locator('.document-title').boundingBox();
   const formattingBox = await page.locator('.text-toolbar').boundingBox();
@@ -221,8 +276,37 @@ try {
   await page.keyboard.press('Control+A');
   await page.getByRole('button', { name: 'Bold' }).click();
   assert.match(await text.innerHTML(), /font-weight|<b|<strong/i, 'header formatting applies to selected text');
+  assert.equal(
+    await page.getByRole('button', { name: 'Bold' }).evaluate((button) => button.classList.contains('is-active')),
+    true,
+    'the Bold control shows an active state while the selection is bold'
+  );
+  // Collapsed-caret toggle must update the control immediately, before any typing. The pending
+  // typing style a browser sets for an empty selection is not reported by queryCommandState, so
+  // toggling bold off with the caret parked in bold text has to flip the button right away.
+  const boldButton = page.getByRole('button', { name: 'Bold' });
+  const boldActive = () => boldButton.evaluate((button) => button.classList.contains('is-active'));
+  await page.keyboard.press('End');
+  assert.equal(await boldActive(), true, 'the Bold control stays active with the caret collapsed inside bold text');
+  await boldButton.click();
+  // Re-check after the browser's asynchronous selectionchange has had a chance to fire: the
+  // toggle must stay reflected, not revert once the deferred selection sync runs.
+  await page.waitForTimeout(80);
+  assert.equal(await boldActive(), false, 'toggling bold off stays reflected at a collapsed caret, before any typing');
+  await boldButton.click();
+  await page.waitForTimeout(80);
+  assert.equal(await boldActive(), true, 'toggling bold back on stays reflected at a collapsed caret');
+  // The Ctrl+B/I/U shortcuts must drive the toolbar through the same path as the buttons, not
+  // the browser's native handler, so the highlight tracks a collapsed-caret toggle instead of
+  // lagging until the next keystroke.
+  await page.keyboard.press('Control+b');
+  await page.waitForTimeout(80);
+  assert.equal(await boldActive(), false, 'the Ctrl+B shortcut updates the Bold control immediately at a collapsed caret');
+  await page.keyboard.press('Control+b');
+  await page.waitForTimeout(80);
+  assert.equal(await boldActive(), true, 'the Ctrl+B shortcut toggles the Bold control back immediately at a collapsed caret');
   await page.getByRole('button', { name: 'Anchor text to bottom' }).click();
-  assert.equal(await page.locator('.page-card').first().evaluate((element) => getComputedStyle(element).alignItems), 'flex-end', 'text supports page-level vertical anchoring');
+  assert.equal(await page.locator('.page-card').first().evaluate((element) => getComputedStyle(element.querySelector('.page-face--front')).justifyContent), 'flex-end', 'text supports page-level vertical anchoring');
 
   await page.locator('.page-insert__trigger').click();
   assert.equal(await page.getByRole('button', { name: /^Rule/ }).count(), 0, 'rule pages are no longer offered');
@@ -251,7 +335,7 @@ try {
   const selectedVersion = versionsPage.locator('.variant-editor');
   await selectedVersion.click();
   await page.keyboard.type('Chosen draft');
-  await versionsPage.getByRole('button', { name: 'Use selected version as text page' }).click();
+  await versionsPage.getByRole('button', { name: 'Use selected version as text tile' }).click();
   assert.equal((await versionsPage.locator('.text-block').innerText()).trim(), 'Chosen draft', 'selected version converts into a text page');
 
   const firstPage = page.locator('.page-card').first();
@@ -261,10 +345,7 @@ try {
   assert.match((await firstPage.locator('.page-side-label').innerText()).trim(), /^notes$/i);
   await firstPageWrapper.locator('.page-handle__notes').click();
 
-  const initialTheme = await page.locator('html').getAttribute('data-theme');
-  await page.getByTitle(/Use (light|dark) mode/).click();
-  const changedTheme = await page.locator('html').getAttribute('data-theme');
-  assert.notEqual(changedTheme, initialTheme, 'theme toggle changes the applied theme');
+  assert.equal(await page.getByTitle(/Use (light|dark) mode/).count(), 0, 'theme control is removed from the editor toolbar');
 
   await page.getByTitle('Zoom in (Ctrl++)').click();
   assert.equal(await page.locator('.zoom-value').innerText(), '110%', 'zoom control updates the workspace scale');
@@ -310,7 +391,7 @@ try {
   assert.equal(Math.round(box.height / drawingStartZoom), 240, 'drawing pages start at their minimum layout height');
   const drawingCardBox = await page.locator('.page-card').last().boundingBox();
   const drawingRailBox = await page.locator('.drawing-toolbar').last().boundingBox();
-  assert.equal(await page.locator('.page-card').last().locator('.page-side-label').count(), 0, 'drawing page has no title');
+  assert.equal(await page.locator('.page-card').last().locator('.page-face--front .page-side-label').count(), 0, 'drawing page front has no title');
   assert.ok(Math.abs(box.x - drawingCardBox.x) < 1 && Math.abs(box.width - drawingCardBox.width) < 1, 'drawing canvas fills the page width');
   assert.ok(drawingRailBox.x > drawingCardBox.x + drawingCardBox.width, 'drawing controls sit on the right');
   await page.mouse.move(box.x + 30, box.y + 30);
@@ -329,9 +410,11 @@ try {
   });
   const colorBeforeThemeChange = await strokeColor();
   assert.ok(colorBeforeThemeChange, 'the drawn stroke produces visible canvas pixels');
-  await page.getByTitle(/Use (light|dark) mode/).click();
+  const themeBeforeRedrawCheck = await page.locator('html').getAttribute('data-theme');
+  await page.locator('html').evaluate((root) => { root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark'; });
   await page.waitForTimeout(30);
   assert.notDeepEqual(await strokeColor(), colorBeforeThemeChange, 'existing drawing colors redraw immediately when the appearance mode changes');
+  await page.locator('html').evaluate((root, theme) => { root.dataset.theme = theme; }, themeBeforeRedrawCheck);
 
   // Workspace zoom must not change a stroke's thickness relative to the drawing: draw a
   // purely horizontal stroke, measure its on-screen thickness with a coverage-sum scan
@@ -363,10 +446,7 @@ try {
   await page.getByTitle('Zoom in (Ctrl++)').click();
   const zoomAfterBump = Number((await page.locator('.zoom-value').innerText()).replace('%', ''));
   assert.equal(zoomAfterBump, zoomBeforeBump + 10, 'zoom moved up one more step for the thickness check');
-  await page.getByTitle(/Use (light|dark) mode/).click();
-  await page.waitForTimeout(30);
-  await page.getByTitle(/Use (light|dark) mode/).click();
-  await page.waitForTimeout(30);
+  await page.waitForTimeout(60);
   const thicknessAfterZoomBump = await scanColumnThickness(stableStrokeXFraction);
   const thicknessRatio = thicknessAfterZoomBump / thicknessBeforeZoomBump;
   const expectedRatio = zoomAfterBump / zoomBeforeBump;
@@ -450,8 +530,8 @@ try {
   const clampedPageWidths = await groupedRow.locator('.page-row__cell').evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().width));
   assert.ok(Math.min(...clampedPageWidths) > 40, 'dragging far past the minimum clamps the split without collapsing a page');
   assert.ok(Math.abs((await groupedRow.boundingBox()).width - rowWidthBeforeColumnDrag) < 1, 'clamping the split still preserves the total document width');
-  // Undo both boundary drags (each checkpoints at pointer-down) to restore the equal
-  // split before the remaining assertions. Blur any editable so Ctrl+Z reaches the app.
+  // Undo both boundary drags (each checkpoints on its first pointer movement) to restore
+  // the equal split before the remaining assertions. Blur any editable so Ctrl+Z reaches the app.
   await page.evaluate(() => { const element = window.document.activeElement; if (element && element !== window.document.body && typeof element.blur === 'function') element.blur(); });
   await page.keyboard.press('Control+z');
   await page.keyboard.press('Control+z');
@@ -584,12 +664,36 @@ try {
   assert.ok(railAfter.drawingRailX > railAfter.versionRailX, 'right rails stay ordered by page after an unequal split');
   assert.ok(Math.abs(railAfter.imageWidth - railAfter.imageCellWidth) <= 2, 'the grouped image still fills its cell after the drag');
 
+  // The Ctrl+S flush must confirm the local-library snapshot without creating any file;
+  // the explicit Export action is the only browser gesture that produces a download.
+  let browserSaveDownloads = 0;
+  const countBrowserSaveDownload = () => { browserSaveDownloads += 1; };
+  page.on('download', countBrowserSaveDownload);
+  await page.keyboard.press('Control+S');
+  await page.getByText('Saved', { exact: true }).waitFor({ state: 'visible' });
+  page.off('download', countBrowserSaveDownload);
+  assert.equal(browserSaveDownloads, 0, 'the browser Ctrl+S flush updates the local library without creating a file');
+
+  // The Export button opens a format picker; the .inktile option produces the same
+  // downloadable archive the button used to create directly.
   const downloadPromise = page.waitForEvent('download');
-  await page.locator('button[title="Save (Ctrl+S)"]').click();
+  await page.locator('button[title="Export…"]').click();
+  await page.locator('.export-option', { hasText: 'Inktile file' }).click();
   const download = await downloadPromise;
   const path = await download.path();
-  assert.ok(path, 'save creates a downloadable .folio file');
-  assert.match(download.suggestedFilename(), /\.folio$/);
+  assert.ok(path, 'export creates a downloadable .inktile file');
+  assert.match(download.suggestedFilename(), /\.inktile$/);
+  await page.locator('.export-option').first().waitFor({ state: 'detached' });
+
+  // The text option downloads a .txt holding the document's text with markup stripped.
+  const textDownloadPromise = page.waitForEvent('download');
+  await page.locator('button[title="Export…"]').click();
+  await page.locator('.export-option', { hasText: 'Text file' }).click();
+  const textDownload = await textDownloadPromise;
+  assert.match(textDownload.suggestedFilename(), /\.txt$/);
+  const exportedText = await readFile(await textDownload.path(), 'utf8');
+  assert.ok(exportedText.trim().length > 0, 'text export is not empty');
+  assert.ok(!/<[a-z][^>]*>/i.test(exportedText), 'text export contains no HTML markup');
 
   // Persisted stroke widths stay in raw layout px: every stroke above was drawn at 110%
   // (or briefly 120%) workspace zoom, but the archived manifest must still record the
@@ -601,15 +705,599 @@ try {
   assert.ok(persistedStrokeWidths.length >= 2, 'expected the strokes drawn earlier on the drawing page to be persisted');
   assert.ok(persistedStrokeWidths.every((width) => width === 3), `persisted stroke widths remain zoom-invariant layout px (slider default 3), got ${JSON.stringify(persistedStrokeWidths)}`);
 
-  const homeChangedViewNextFrame = await page.getByRole('button', { name: 'Back to folios' }).evaluate(async (button) => {
+  // Exercise native path semantics with a small Tauri IPC mock. An externally opened
+  // inktile must overwrite its known path, while a library-only inktile must stay inside
+  // the local library until Save As explicitly chooses a destination.
+  const nativeArchiveBytes = Array.from(await readFile(path));
+  const nativePath = 'C:\\Inktiles\\existing.inktile';
+  const saveAsPath = 'C:\\Inktiles\\explicit-copy.inktile';
+  const nativeContext = await browser.newContext({ viewport: { width: 1180, height: 820 } });
+  await nativeContext.addInitScript(({ archiveBytes, openPath, chosenPath }) => {
+    window.__inktileNativeMock = {
+      archiveBytes,
+      openPath,
+      chosenPath,
+      saveDialogCalls: 0,
+      pendingWritePath: null,
+      writePaths: []
+    };
+    // The event plugin's unlisten path goes through this second global.
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+    window.__TAURI_INTERNALS__ = {
+      // getCurrentWindow()/getCurrentWebview() read these labels synchronously; without
+      // them the Home drag-drop listener throws before it can register.
+      metadata: {
+        currentWindow: { label: 'main' },
+        currentWebview: { label: 'main', windowLabel: 'main' }
+      },
+      // The event system registers listener callbacks through these two hooks.
+      transformCallback: (() => { let next = 1; return () => next++; })(),
+      unregisterCallback: () => {},
+      invoke: async (command, args, options) => {
+        const mock = window.__inktileNativeMock;
+        if (command === 'plugin:event|listen' || command === 'plugin:event|unlisten') return null;
+        if (command === 'plugin:dialog|open') return mock.openPath;
+        if (command === 'plugin:dialog|save') {
+          mock.saveDialogCalls += 1;
+          return mock.chosenPath;
+        }
+        if (command === 'plugin:fs|read_file') return mock.archiveBytes;
+        if (command === 'plugin:fs|write_file') {
+          mock.pendingWritePath = decodeURIComponent(options?.headers?.path ?? '');
+          return null;
+        }
+        if (command === 'plugin:fs|rename') {
+          // Every native document write must be atomic: bytes to `<target>.tmp`, then a
+          // rename over the target. writePaths records confirmed destinations only.
+          const oldPath = args?.oldPath ?? '';
+          const newPath = args?.newPath ?? '';
+          if (oldPath !== `${newPath}.tmp` || mock.pendingWritePath !== oldPath) {
+            throw new Error(`Unexpected write sequence: wrote ${mock.pendingWritePath}, renamed ${oldPath} -> ${newPath}`);
+          }
+          mock.writePaths.push(newPath);
+          mock.pendingWritePath = null;
+          return null;
+        }
+        throw new Error(`Unexpected native mock command: ${command}`);
+      }
+    };
+  }, { archiveBytes: nativeArchiveBytes, openPath: nativePath, chosenPath: saveAsPath });
+
+  try {
+    const nativePage = await nativeContext.newPage();
+    const nativeConsoleErrors = [];
+    nativePage.on('console', (message) => {
+      if (message.type() === 'error') nativeConsoleErrors.push(message.text());
+    });
+    nativePage.on('pageerror', (error) => nativeConsoleErrors.push(error.message));
+    await nativePage.goto(smokeUrl);
+    await nativePage.locator('.library').waitFor({ state: 'visible' });
+    await nativePage.getByRole('button', { name: /^Open .inktile/ }).click();
+    await nativePage.locator('.page-stack').waitFor({ state: 'visible' });
+
+    await nativePage.keyboard.press('Control+S');
+    await nativePage.waitForFunction(() => window.__inktileNativeMock.writePaths.length === 1, undefined, { timeout: 10_000 });
+    let nativeState = await nativePage.evaluate(() => ({
+      saveDialogCalls: window.__inktileNativeMock.saveDialogCalls,
+      writePaths: [...window.__inktileNativeMock.writePaths]
+    }));
+    assert.equal(nativeState.saveDialogCalls, 0, 'native Save does not open a destination dialog for an external inktile');
+    assert.deepEqual(nativeState.writePaths, [nativePath], 'native Save overwrites the path returned by Open');
+
+    await nativePage.getByRole('button', { name: 'Back to inktiles' }).click();
+    await nativePage.locator('.inktile-card__open').waitFor({ state: 'visible' });
+    await nativePage.locator('.inktile-card__open').click();
+    await nativePage.locator('.page-stack').waitFor({ state: 'visible' });
+    await nativePage.keyboard.press('Control+S');
+    await nativePage.waitForFunction(() => window.__inktileNativeMock.writePaths.length === 2, undefined, { timeout: 10_000 });
+    nativeState = await nativePage.evaluate(() => ({
+      saveDialogCalls: window.__inktileNativeMock.saveDialogCalls,
+      writePaths: [...window.__inktileNativeMock.writePaths]
+    }));
+    assert.equal(nativeState.saveDialogCalls, 0, 'reopening the imported inktile from the library retains its native path');
+    assert.deepEqual(nativeState.writePaths, [nativePath, nativePath], 'the reopened inktile still overwrites its original file');
+
+    // Editing alone must reach the external file through the debounced autosave —
+    // no Ctrl+S, no destination dialog.
+    await nativePage.locator('.document-title').fill('Native autosave');
+    await nativePage.waitForFunction(() => window.__inktileNativeMock.writePaths.length === 3, undefined, { timeout: 10_000 });
+    nativeState = await nativePage.evaluate(() => ({
+      saveDialogCalls: window.__inktileNativeMock.saveDialogCalls,
+      writePaths: [...window.__inktileNativeMock.writePaths]
+    }));
+    assert.equal(nativeState.saveDialogCalls, 0, 'autosave never opens a destination dialog');
+    assert.deepEqual(nativeState.writePaths, [nativePath, nativePath, nativePath], 'editing autosaves over the known native path without Ctrl+S');
+
+    // New inktile is a home-only action now, so make one from the library, not the editor.
+    await nativePage.getByRole('button', { name: 'Back to inktiles' }).click();
+    await nativePage.getByRole('button', { name: /^New inktile/ }).click();
+    await nativePage.locator('.page-insert__trigger').waitFor({ state: 'visible' });
+    await nativePage.keyboard.press('Control+S');
+    await nativePage.getByText('Saved', { exact: true }).waitFor({ state: 'visible' });
+    nativeState = await nativePage.evaluate(() => ({
+      saveDialogCalls: window.__inktileNativeMock.saveDialogCalls,
+      writePaths: [...window.__inktileNativeMock.writePaths]
+    }));
+    assert.equal(nativeState.saveDialogCalls, 0, 'normal Save keeps a library-only inktile in the local library');
+    assert.deepEqual(nativeState.writePaths, [nativePath, nativePath, nativePath], 'normal Save does not create an external file for a library-only inktile');
+
+    await nativePage.keyboard.press('Control+Shift+S');
+    await nativePage.waitForFunction(() => window.__inktileNativeMock.writePaths.length === 4, undefined, { timeout: 10_000 });
+    nativeState = await nativePage.evaluate(() => ({
+      saveDialogCalls: window.__inktileNativeMock.saveDialogCalls,
+      writePaths: [...window.__inktileNativeMock.writePaths]
+    }));
+    assert.equal(nativeState.saveDialogCalls, 1, 'Save As explicitly opens the destination dialog');
+    assert.equal(nativeState.writePaths.at(-1), saveAsPath, 'Save As writes the chosen destination');
+    assert.deepEqual(nativeConsoleErrors, [], `native mock console errors: ${nativeConsoleErrors.join('\n')}`);
+  } finally {
+    await nativeContext.close();
+  }
+
+  // Tile multi-selection: Ctrl+A selects every tile, Ctrl+Click on handles toggles tiles
+  // into a multi-selection, and the selection supports duplicate/copy/paste/flip/delete
+  // shortcuts, a group right-click menu, and group dragging.
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    const element = window.document.activeElement;
+    if (element && element !== window.document.body && typeof element.blur === 'function') element.blur();
+  });
+  const tileCountBeforeSelection = await page.locator('.page-wrapper').count();
+  await page.keyboard.press('Control+a');
+  assert.equal(await page.locator('.page-wrapper.is-selected').count(), tileCountBeforeSelection, 'Ctrl+A selects every tile');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.page-wrapper.is-selected').count(), 0, 'Escape clears the tile selection');
+
+  const ctrlClickHandle = async (wrapper) => {
+    await wrapper.scrollIntoViewIfNeeded();
+    const handleBox = await wrapper.locator('.page-handle__drag').boundingBox();
+    await page.keyboard.down('Control');
+    await page.mouse.click(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+    await page.keyboard.up('Control');
+  };
+  await ctrlClickHandle(page.locator('.page-wrapper').first());
+  await ctrlClickHandle(page.locator('.page-wrapper').last());
+  assert.equal(await page.locator('.page-wrapper.is-selected').count(), 2, 'Ctrl+Click on handles builds a multi-selection');
+  assert.equal(
+    await page.locator('.page-wrapper.is-selected').first().locator('.page-handle').evaluate((element) => getComputedStyle(element).outlineStyle),
+    'solid',
+    'a selected tile outlines its left handle as well as its card'
+  );
+
+  await page.keyboard.press('Control+d');
+  await page.waitForTimeout(40);
+  assert.equal(await page.locator('.page-wrapper').count(), tileCountBeforeSelection + 2, 'Ctrl+D duplicates every selected tile');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(40);
+  assert.equal(await page.locator('.page-wrapper').count(), tileCountBeforeSelection, 'Delete removes the (duplicated) selection');
+
+  await ctrlClickHandle(page.locator('.page-wrapper').first());
+  await page.keyboard.press('Control+c');
+  await page.keyboard.press('Control+v');
+  await page.waitForTimeout(40);
+  assert.equal(await page.locator('.page-wrapper').count(), tileCountBeforeSelection + 1, 'Ctrl+C / Ctrl+V pastes a copy of the selected tile');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(40);
+  assert.equal(await page.locator('.page-wrapper').count(), tileCountBeforeSelection, 'the pasted tile is selected and deletes cleanly');
+
+  const firstSelectableWrapper = page.locator('.page-wrapper').first();
+  await ctrlClickHandle(firstSelectableWrapper);
+  await ctrlClickHandle(page.locator('.page-wrapper').last());
+  const menuHandleBox = await firstSelectableWrapper.locator('.page-handle__drag').boundingBox();
+  await page.mouse.click(menuHandleBox.x + 2, menuHandleBox.y + 2, { button: 'right' });
+  await page.locator('.home-menu').waitFor({ state: 'visible' });
+  assert.match(await page.locator('.home-menu__title').innerText(), /2 tiles selected/i, 'right-clicking a selected tile opens the multi-tile menu');
+  await page.getByRole('menuitem', { name: 'Flip 2 tiles' }).click();
+  await page.waitForTimeout(120);
+  assert.equal(await firstSelectableWrapper.locator('.page-card').evaluate((element) => element.classList.contains('is-flipped')), true, 'the menu flips the first selected tile to notes');
+  assert.equal(await page.locator('.page-wrapper').last().locator('.page-card').evaluate((element) => element.classList.contains('is-flipped')), true, 'the menu flips the last selected tile to notes');
+  await page.keyboard.press('f');
+  await page.waitForTimeout(120);
+  assert.equal(await page.locator('.page-card.is-flipped').count(), 0, 'the F shortcut flips the selection back to the front');
+
+  // Group dragging: the last two tiles share the bottom row, so dragging one of their
+  // selected handles above the top row must carry both, still grouped side by side.
+  await page.keyboard.press('Escape');
+  const tileIdsBeforeGroupDrag = await page.locator('.page-wrapper').evaluateAll((elements) => elements.map((element) => element.dataset.pageId));
+  const groupDragIds = tileIdsBeforeGroupDrag.slice(-2);
+  await ctrlClickHandle(page.locator('.page-wrapper').nth(tileCountBeforeSelection - 2));
+  await ctrlClickHandle(page.locator('.page-wrapper').last());
+  const groupDragHandleBox = await page.locator('.page-wrapper').nth(tileCountBeforeSelection - 2).locator('.page-handle__drag').boundingBox();
+  const groupDropBox = await page.locator('.page-wrapper').first().boundingBox();
+  await page.mouse.move(groupDragHandleBox.x + groupDragHandleBox.width / 2, groupDragHandleBox.y + groupDragHandleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(groupDropBox.x + groupDropBox.width / 2, groupDropBox.y + 4, { steps: 12 });
+  assert.equal(await page.locator('.page-wrapper.is-dragging').count(), 2, 'both selected tiles render as dragging during a group drag');
+  await page.mouse.up();
+  await page.waitForTimeout(40);
+  const tileIdsAfterGroupDrag = await page.locator('.page-wrapper').evaluateAll((elements) => elements.map((element) => element.dataset.pageId));
+  assert.deepEqual(tileIdsAfterGroupDrag.slice(0, 2), groupDragIds, 'dragging a selected handle moves the whole selection before the drop row');
+  const groupDragRowSize = await page.locator('.page-row').first().locator('.page-row__cell').count();
+  assert.equal(groupDragRowSize, 2, 'tiles selected from one row stay grouped in one row after a group drag');
+
+  // A plain handle click (press and release without movement) collapses the selection to
+  // just that tile, releasing the rest of the group.
+  assert.equal(await page.locator('.page-wrapper.is-selected').count(), 2, 'the moved group stays selected after the drop');
+  const collapseHandleBox = await page.locator('.page-wrapper').first().locator('.page-handle__drag').boundingBox();
+  await page.mouse.click(collapseHandleBox.x + collapseHandleBox.width / 2, collapseHandleBox.y + collapseHandleBox.height / 2);
+  assert.equal(await page.locator('.page-wrapper.is-selected').count(), 1, 'a plain handle click selects only that tile');
+  assert.equal(await page.locator('.page-wrapper.is-selected').first().evaluate((element) => element.dataset.pageId), groupDragIds[0], 'the clicked tile is the one that stays selected');
+
+  await page.mouse.click(groupDropBox.x + groupDropBox.width / 2, groupDropBox.y + groupDropBox.height / 2);
+  assert.equal(await page.locator('.page-wrapper.is-selected').count(), 0, 'a plain click away from the handles clears the tile selection');
+
+  // Edge selection: a plain click on a row's bottom edge strip selects that edge as an
+  // insertion point (mutually exclusive with tile selection); Ctrl+V pastes there, and
+  // right-clicking an edge offers adding or pasting at that exact spot.
+  const firstRowStrip = page.locator('.page-row').first().locator('.page-row-resize-handle');
+  const stripBox = await firstRowStrip.boundingBox();
+  await page.mouse.click(stripBox.x + stripBox.width / 2, stripBox.y + stripBox.height / 2);
+  assert.equal(await page.locator('.page-edge-selection').count(), 1, 'clicking a row edge selects it as an insertion point');
+  assert.equal(await page.locator('.page-wrapper.is-selected').count(), 0, 'edge selection and tile selection stay mutually exclusive');
+  const idsBeforeEdgePaste = await page.locator('.page-wrapper').evaluateAll((elements) => elements.map((element) => element.dataset.pageId));
+  await page.keyboard.press('Control+v');
+  await page.waitForTimeout(40);
+  const idsAfterEdgePaste = await page.locator('.page-wrapper').evaluateAll((elements) => elements.map((element) => element.dataset.pageId));
+  assert.equal(idsAfterEdgePaste.length, idsBeforeEdgePaste.length + 1, 'Ctrl+V pastes at the selected edge');
+  assert.deepEqual(idsAfterEdgePaste.slice(0, 2), idsBeforeEdgePaste.slice(0, 2), 'tiles above the selected edge stay put');
+  assert.deepEqual(idsAfterEdgePaste.slice(3), idsBeforeEdgePaste.slice(2), 'the pasted tile lands exactly at the selected edge');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(40);
+
+  const edgeMenuStripBox = await page.locator('.page-row').first().locator('.page-row-resize-handle').boundingBox();
+  await page.mouse.click(edgeMenuStripBox.x + edgeMenuStripBox.width / 2, edgeMenuStripBox.y + edgeMenuStripBox.height / 2, { button: 'right' });
+  await page.locator('.home-menu').waitFor({ state: 'visible' });
+  await page.getByRole('menuitem', { name: 'Add tile here' }).click();
+  await page.waitForTimeout(40);
+  const idsAfterEdgeAdd = await page.locator('.page-wrapper').evaluateAll((elements) => elements.map((element) => element.dataset.pageId));
+  assert.equal(idsAfterEdgeAdd.length, idsBeforeEdgePaste.length + 1, 'right-clicking an edge offers adding a tile at that spot');
+  assert.deepEqual(idsAfterEdgeAdd.slice(3), idsBeforeEdgePaste.slice(2), 'the added tile lands at the right-clicked edge');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(40);
+  assert.equal(await page.locator('.page-wrapper').count(), idsBeforeEdgePaste.length, 'edge insertions clean up for the remaining assertions');
+
+  // The very top of the document is a selectable edge too: pasting there puts the
+  // tile above the first row.
+  const topStripBox = await page.locator('.page-row-top-edge').boundingBox();
+  await page.mouse.click(topStripBox.x + topStripBox.width / 2, topStripBox.y + topStripBox.height / 2);
+  assert.equal(await page.locator('.page-edge-selection--top').count(), 1, 'clicking above the first row selects the top edge');
+  await page.keyboard.press('Control+v');
+  await page.waitForTimeout(40);
+  const idsAfterTopPaste = await page.locator('.page-wrapper').evaluateAll((elements) => elements.map((element) => element.dataset.pageId));
+  assert.equal(idsAfterTopPaste.length, idsBeforeEdgePaste.length + 1, 'Ctrl+V pastes at the top edge');
+  assert.deepEqual(idsAfterTopPaste.slice(1), idsBeforeEdgePaste, 'the pasted tile lands above the first row');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(40);
+
+  // Vertical boundaries between grouped tiles are selectable edges as well: pasting
+  // inserts into the row at that column, respecting the four-per-row maximum.
+  const pairRow = page.locator('.page-row').first();
+  const pairHandleBox = await pairRow.locator('.page-column-resize-handle').first().boundingBox();
+  await page.mouse.click(pairHandleBox.x + pairHandleBox.width / 2, pairHandleBox.y + pairHandleBox.height / 2);
+  assert.equal(await page.locator('.page-edge-selection--column').count(), 1, 'clicking the boundary between grouped tiles selects that vertical edge');
+  await page.keyboard.press('Control+v');
+  await page.waitForTimeout(40);
+  assert.equal(await pairRow.locator('.page-row__cell').count(), 3, 'Ctrl+V pastes into the row at the selected vertical edge');
+  const middleCellId = await pairRow.locator('.page-row__cell').nth(1).locator('[data-page-id]').evaluate((element) => element.dataset.pageId);
+  assert.ok(!idsBeforeEdgePaste.includes(middleCellId), 'the pasted tile sits between the two grouped tiles');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(40);
+  assert.equal(await pairRow.locator('.page-row__cell').count(), 2, 'deleting the pasted tile restores the grouped pair');
+
+  const pairMenuHandleBox = await pairRow.locator('.page-column-resize-handle').first().boundingBox();
+  await page.mouse.click(pairMenuHandleBox.x + pairMenuHandleBox.width / 2, pairMenuHandleBox.y + pairMenuHandleBox.height / 2, { button: 'right' });
+  await page.locator('.home-menu').waitFor({ state: 'visible' });
+  await page.getByRole('menuitem', { name: 'Add tile here' }).click();
+  await page.waitForTimeout(40);
+  assert.equal(await pairRow.locator('.page-row__cell').count(), 3, 'the vertical edge menu adds a tile between the grouped tiles');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(40);
+  assert.equal(await page.locator('.page-wrapper').count(), idsBeforeEdgePaste.length, 'vertical edge insertions clean up for the remaining assertions');
+
+  // The document's outer left and right edges are vertical edges too: they insert at
+  // the start or the end of that row.
+  const leftStripBox = await pairRow.locator('.page-row-side-edge--left').boundingBox();
+  await page.mouse.click(leftStripBox.x + leftStripBox.width / 2, leftStripBox.y + leftStripBox.height / 2);
+  assert.equal(await page.locator('.page-edge-selection--column').count(), 1, 'clicking the document left edge selects a vertical edge');
+  await page.keyboard.press('Control+v');
+  await page.waitForTimeout(40);
+  assert.equal(await pairRow.locator('.page-row__cell').count(), 3, 'Ctrl+V pastes at the start of the row from the left edge');
+  const firstCellId = await pairRow.locator('.page-row__cell').first().locator('[data-page-id]').evaluate((element) => element.dataset.pageId);
+  assert.ok(!idsBeforeEdgePaste.includes(firstCellId), 'the pasted tile becomes the first tile of the row');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(40);
+
+  const rightStripBox = await pairRow.locator('.page-row-side-edge--right').boundingBox();
+  await page.mouse.click(rightStripBox.x + rightStripBox.width / 2, rightStripBox.y + rightStripBox.height / 2, { button: 'right' });
+  await page.locator('.home-menu').waitFor({ state: 'visible' });
+  await page.getByRole('menuitem', { name: 'Add tile here' }).click();
+  await page.waitForTimeout(40);
+  assert.equal(await pairRow.locator('.page-row__cell').count(), 3, 'the right edge menu adds a tile at the end of the row');
+  const lastCellId = await pairRow.locator('.page-row__cell').last().locator('[data-page-id]').evaluate((element) => element.dataset.pageId);
+  assert.ok(!idsBeforeEdgePaste.includes(lastCellId), 'the added tile becomes the last tile of the row');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(40);
+  assert.equal(await page.locator('.page-wrapper').count(), idsBeforeEdgePaste.length, 'side edge insertions clean up for the remaining assertions');
+
+  // Edge strips only light up while the cursor is over the strip itself: hovering a
+  // tile must not bold the row edge below it or the vertical edge beside it.
+  const rowStripSpanOpacity = () => pairRow.locator('.page-row-resize-handle span').evaluate((element) => getComputedStyle(element).opacity);
+  const columnStripSpanOpacity = () => pairRow.locator('.page-column-resize-handle span').first().evaluate((element) => getComputedStyle(element).opacity);
+  const hoverCardBox = await pairRow.locator('.page-card').first().boundingBox();
+  await page.mouse.move(hoverCardBox.x + hoverCardBox.width / 2, hoverCardBox.y + hoverCardBox.height / 2);
+  await page.waitForTimeout(250);
+  assert.equal(await rowStripSpanOpacity(), '0', 'hovering a tile does not bold the row edge strip');
+  assert.equal(await columnStripSpanOpacity(), '0', 'hovering a tile does not bold the vertical edge strip');
+  const hoverStripBox = await pairRow.locator('.page-row-resize-handle').boundingBox();
+  await page.mouse.move(hoverStripBox.x + hoverStripBox.width / 2, hoverStripBox.y + hoverStripBox.height / 2);
+  await page.waitForTimeout(250);
+  assert.ok(Number(await rowStripSpanOpacity()) > 0.5, 'hovering an edge strip itself bolds that strip');
+  assert.equal(await columnStripSpanOpacity(), '0', 'hovering one edge strip leaves the other edges unbolded');
+
+  // Agent turn: a mocked broker transport (mirroring the Tauri IPC mock) drives the real
+  // panel, connection, op application, and turn lock. Covers: read-only lock while a turn
+  // runs, live op streaming into the document, the revision guard rejecting stale writes,
+  // one-undo-per-turn semantics, and the stop button keeping partial work.
+  await page.evaluate(() => {
+    const state = { receive: null, log: { staleRejected: false, stopRequested: false, error: null, opFailure: null, model: null } };
+    window.__inktileAgentMockState = state;
+    const waiters = [];
+    const results = [];
+    const nextResult = () => new Promise((resolve) => {
+      if (results.length) resolve(results.shift());
+      else waiters.push(resolve);
+    });
+    let callCounter = 0;
+    const sendOp = async (op) => {
+      state.receive(JSON.stringify({ type: 'op', callId: `mock-call-${callCounter++}`, op }));
+      return nextResult();
+    };
+    // A tiny but valid mono 16-bit WAV, so the audio pipeline is exercised with
+    // bytes the browser can genuinely decode.
+    const wavBase64 = (() => {
+      const bytes = new Uint8Array(60);
+      const view = new DataView(bytes.buffer);
+      const ascii = (offset, text) => { for (let index = 0; index < text.length; index += 1) bytes[offset + index] = text.charCodeAt(index); };
+      ascii(0, 'RIFF'); view.setUint32(4, 52, true); ascii(8, 'WAVE');
+      ascii(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+      view.setUint32(24, 8000, true); view.setUint32(28, 16000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+      ascii(36, 'data'); view.setUint32(40, 16, true);
+      for (let index = 0; index < 8; index += 1) view.setInt16(44 + index * 2, Math.round(Math.sin(index / 2) * 8000), true);
+      return btoa(String.fromCharCode(...bytes));
+    })();
+    const runScriptedTurn = async (prompt) => {
+      state.receive(JSON.stringify({ type: 'turn-start', promptId: prompt.promptId }));
+      state.receive(JSON.stringify({ type: 'narration', promptId: prompt.promptId, text: 'Writing a **short report** into a new page…\n\n- reading the document\n- streaming the text' }));
+      const read = await sendOp({ kind: 'read_document' });
+      let revision = read.result.revision;
+      const lastPageId = read.result.document.pageRows.flat().at(-1);
+      // A write computed against a stale revision must bounce off the guard.
+      const stale = await sendOp({ kind: 'append_text', pageId: lastPageId, html: 'x', baseRevision: revision - 1 });
+      state.log.staleRejected = stale.ok === false && stale.code === 'revision';
+      // Every op below must succeed; mustOk threads the revision and records failures.
+      const mustOk = async (op) => {
+        const outcome = await sendOp({ ...op, baseRevision: revision });
+        if (!outcome.ok) state.log.opFailure = `${op.kind}: ${outcome.error}`;
+        else revision = outcome.result.revision;
+        return outcome.result ?? {};
+      };
+      const inserted = await mustOk({ kind: 'insert_page', afterPageId: lastPageId, html: '<p>Agent report:</p>' });
+      const pageId = inserted.pageId;
+      for (const word of ['The', ' agent', ' streamed', ' this', ' sentence', ' word', ' by', ' word.']) {
+        await mustOk({ kind: 'append_text', pageId, html: word });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      }
+      // Full-control surface: rename, versions lifecycle, drawing, audio,
+      // resize, notes, deletion — all inside the same single-undo turn.
+      await mustOk({ kind: 'set_title', title: 'Inkjet Report' });
+      const versions = await mustOk({ kind: 'insert_versions', afterPageId: pageId, variants: [{ label: 'A', html: '<p>Draft A</p>' }, { label: 'B', html: '<p>Draft B</p>' }], activeIndex: 0 });
+      await mustOk({ kind: 'edit_versions', pageId: versions.pageId, activeIndex: 1 });
+      const drawing = await mustOk({ kind: 'create_drawing', afterPageId: versions.pageId, height: 260, strokes: [{ tool: 'pen', width: 4, points: [{ x: 0.2, y: 0.2 }, { x: 0.5, y: 0.4 }, { x: 0.8, y: 0.8 }] }] });
+      await mustOk({ kind: 'edit_drawing', pageId: drawing.pageId, strokes: [{ tool: 'highlighter', points: [{ x: 0.1, y: 0.9 }, { x: 0.9, y: 0.9 }] }], mode: 'append' });
+      await mustOk({ kind: 'insert_media', afterPageId: drawing.pageId, filename: 'ping.wav', mimeType: 'audio/wav', alt: 'test tone', bytesBase64: wavBase64 });
+      await mustOk({ kind: 'set_row_height', pageId, height: 300 });
+      await mustOk({ kind: 'edit_notes', pageId, html: '<p>note from inkjet</p>' });
+      await mustOk({ kind: 'delete_pages', pageIds: [versions.pageId] });
+      state.receive(JSON.stringify({ type: 'turn-end', promptId: prompt.promptId, reason: 'done' }));
+    };
+    const runSlowTurn = async (prompt) => {
+      state.receive(JSON.stringify({ type: 'turn-start', promptId: prompt.promptId }));
+      // Ephemeral reasoning: with no narration to supersede it, this thinking
+      // bubble persists through the whole turn and is dropped only at turn-end.
+      state.receive(JSON.stringify({ type: 'thinking', promptId: prompt.promptId, text: 'Planning the slow drip, one word at a time…' }));
+      const read = await sendOp({ kind: 'read_document' });
+      let revision = read.result.revision;
+      const inserted = await sendOp({ kind: 'insert_page', afterPageId: read.result.document.pageRows.flat().at(-1), baseRevision: revision });
+      const pageId = inserted.result.pageId;
+      revision = inserted.result.revision;
+      for (let index = 0; index < 200 && !state.log.stopRequested; index += 1) {
+        const appended = await sendOp({ kind: 'append_text', pageId, html: ' drip', baseRevision: revision });
+        if (!appended.ok) break;
+        revision = appended.result.revision;
+        await new Promise((resolve) => setTimeout(resolve, 60));
+      }
+      state.receive(JSON.stringify({ type: 'turn-end', promptId: prompt.promptId, reason: 'stopped' }));
+    };
+    window.__inktileAgentMock = {
+      connect(receive, closed) {
+        state.receive = receive;
+        return {
+          send(data) {
+            const message = JSON.parse(data);
+            if (message.type === 'probe') {
+              // Availability drives the provider screen: only Claude is "installed".
+              state.receive(JSON.stringify({
+                type: 'status',
+                backends: {
+                  claude: { available: true, detail: 'Using your existing Claude Code login.', models: [{ id: '', label: 'Default' }, { id: 'sonnet', label: 'Sonnet' }] },
+                  codex: { available: false, detail: 'The codex CLI was not found.', models: [] }
+                }
+              }));
+            } else if (message.type === 'tool-result') {
+              const waiter = waiters.shift();
+              if (waiter) waiter(message);
+              else results.push(message);
+            } else if (message.type === 'prompt') {
+              state.log.model = message.model ?? null;
+              const run = message.prompt.startsWith('slow') ? runSlowTurn : runScriptedTurn;
+              run(message).catch((error) => {
+                state.log.error = String(error);
+                state.receive(JSON.stringify({ type: 'turn-end', promptId: message.promptId, reason: 'error', error: String(error) }));
+              });
+            } else if (message.type === 'stop') {
+              state.log.stopRequested = true;
+            }
+          },
+          close() { closed(); }
+        };
+      }
+    };
+  });
+
+  // Opening the panel is all it takes: the app starts the (mocked) broker itself,
+  // detects which providers are installed and signed in, and offers only those.
+  await page.getByRole('button', { name: 'Inkjet panel' }).click();
+  await page.getByRole('button', { name: 'Start session' }).waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.inkjet-setup__providers label').count(), 1, 'only detected providers are offered (unavailable ones are hidden)');
+  assert.match(await page.locator('.inkjet-setup__providers label').innerText(), /Claude/, 'the available provider is listed');
+  assert.equal(await page.locator('.inkjet-setup__providers input').isChecked(), true, 'a single available provider is preselected');
+  await page.getByLabel('Inkjet model').selectOption('sonnet');
+  await page.getByRole('button', { name: 'Start session' }).click();
+  await page.getByLabel('Inkjet prompt').waitFor({ state: 'visible' });
+  assert.match(await page.locator('.inkjet-panel__session').innerText(), /Claude · Sonnet/i, 'the chat header shows the session provider and model');
+
+  // The panel edge drags to resize (persisted); at 100% UI scale the pointer maps 1:1.
+  const panelBoxBefore = await page.locator('.inkjet-panel').boundingBox();
+  const resizeStrip = await page.locator('.inkjet-panel__resize').boundingBox();
+  await dragPointer(resizeStrip.x + 4, resizeStrip.y + resizeStrip.height / 2, resizeStrip.x + 4 - 120, resizeStrip.y + resizeStrip.height / 2);
+  const panelBoxAfter = await page.locator('.inkjet-panel').boundingBox();
+  assert.ok(
+    Math.abs((panelBoxAfter.width - panelBoxBefore.width) - 120) < 6,
+    `dragging the edge widens the panel one-to-one (${panelBoxBefore.width.toFixed(1)} -> ${panelBoxAfter.width.toFixed(1)})`
+  );
+
+  // The composer grows with its content; the manual resize grip is gone.
+  const composer = page.getByLabel('Inkjet prompt');
+  assert.equal(await composer.evaluate((element) => getComputedStyle(element).resize), 'none', 'the composer has no manual resize grip');
+  const composerHeightBefore = (await composer.boundingBox()).height;
+  await composer.fill('one\ntwo\nthree\nfour\nfive');
+  const composerHeightTall = (await composer.boundingBox()).height;
+  assert.ok(composerHeightTall > composerHeightBefore + 20, `the composer grows to fit its text (${composerHeightBefore} -> ${composerHeightTall})`);
+  await composer.fill('');
+  assert.ok((await composer.boundingBox()).height <= composerHeightBefore + 1, 'clearing the prompt shrinks the composer back');
+
+  const pagesBeforeAgentTurn = await page.locator('.page-wrapper').count();
+  const drawingsBeforeAgentTurn = await page.locator('.page-card--drawing').count();
+  const versionsBeforeAgentTurn = await page.locator('.variant-block').count();
+  const titleBeforeAgentTurn = await page.locator('.document-title').inputValue();
+  assert.equal(await page.locator('.text-block').first().getAttribute('contenteditable'), 'true', 'text blocks are editable before an agent turn');
+  await page.getByLabel('Inkjet prompt').fill('Write a short report');
+  await page.keyboard.press('Enter');
+  await page.locator('.workspace--agent-locked').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.inkjet-turn-indicator').count(), 1, 'an Inkjet turn shows the printing indicator with its stop button');
+  assert.match(await page.locator('.inkjet-turn-indicator').innerText(), /printing/i, 'the turn indicator reads "Inkjet is printing"');
+  assert.equal(await page.locator('.text-block').first().getAttribute('contenteditable'), 'false', 'text blocks are read-only while the agent holds the document');
+  // Live streaming: partial content must be visible while the lock is still on.
+  await page.waitForFunction(() =>
+    document.querySelector('.workspace--agent-locked') &&
+    [...document.querySelectorAll('.text-block')].some((element) => element.textContent.includes('The agent'))
+  );
+  await page.locator('.workspace--agent-locked').waitFor({ state: 'detached' });
+  const agentMockLog = await page.evaluate(() => window.__inktileAgentMockState.log);
+  assert.equal(agentMockLog.error, null, `the mocked agent turn completed without protocol errors: ${agentMockLog.error}`);
+  assert.equal(agentMockLog.opFailure, null, `every full-control op succeeded: ${agentMockLog.opFailure}`);
+  assert.equal(agentMockLog.model, 'sonnet', 'the prompt carries the model chosen at session start');
+  assert.equal(agentMockLog.staleRejected, true, 'a write against a stale revision is rejected with a revision error');
+  // Text + drawing + audio pages remain; the versions page was inserted, reworked, then deleted.
+  assert.equal(await page.locator('.page-wrapper').count(), pagesBeforeAgentTurn + 3, 'the turn added a text, a drawing, and an audio page');
+  assert.equal(await page.locator('.variant-block').count(), versionsBeforeAgentTurn, 'the versions page the agent created and deleted is gone');
+  assert.equal(await page.locator('.page-card--drawing').count(), drawingsBeforeAgentTurn + 1, 'the agent authored a drawing page');
+  assert.equal(await page.locator('.document-title').inputValue(), 'Inkjet Report', 'the agent renamed the document');
+  const agentPageText = await page.locator('.page-wrapper').filter({ hasText: 'Agent report:' }).locator('.page-face--front .text-block').innerText();
+  assert.match(agentPageText, /Agent report:\s*The agent streamed this sentence word by word\./, 'streamed appends assembled the complete text');
+  // edit_notes wrote the tile's back face without flipping it.
+  const agentNotesText = await page.locator('.page-wrapper').filter({ hasText: 'Agent report:' }).locator('.page-face--back .text-block').innerText();
+  assert.match(agentNotesText, /note from inkjet/, 'the agent wrote the page notes');
+  // Audio must land as a decodable asset: real controls and the exact MIME of the bytes.
+  assert.equal(await page.locator('audio').count(), 1, 'the agent inserted an audio page');
+  const audioProbe = await page.evaluate(async () => {
+    const element = document.querySelector('audio');
+    const blob = await (await fetch(element.src)).blob();
+    return { controls: element.hasAttribute('controls'), type: blob.type, size: blob.size };
+  });
+  assert.equal(audioProbe.controls, true, 'the audio page renders playback controls');
+  assert.equal(audioProbe.type, 'audio/wav', 'the audio asset keeps the true MIME of its bytes');
+  assert.ok(audioProbe.size > 0, 'the audio asset carries its bytes');
+  assert.equal(await page.locator('.text-block').first().getAttribute('contenteditable'), 'true', 'ending the turn returns the document to the user');
+  assert.match(await page.locator('.inkjet-entry--agent').first().innerText(), /report/i, 'the panel shows the streamed narration');
+  // Narration renders as markdown (React elements, no raw HTML injection).
+  const agentBubble = page.locator('.inkjet-entry--agent').first();
+  assert.equal(await agentBubble.locator('strong').innerText(), 'short report', 'agent narration renders markdown bold');
+  assert.equal(await agentBubble.locator('ul li').count(), 2, 'agent narration renders markdown lists');
+  // The transcript uses the shared overlay scrollbar instead of the native one.
+  assert.equal(
+    await page.locator('.inkjet-panel__transcript').evaluate((element) => getComputedStyle(element).scrollbarWidth),
+    'none',
+    'the transcript hides the native scrollbar'
+  );
+  await page.locator('.inkjet-panel__transcript-wrap').evaluate((element) => { element.style.maxHeight = '90px'; });
+  await page.locator('.inkjet-scrollbar .element-scrollbar__handle').waitFor({ state: 'visible' });
+  await page.locator('.inkjet-panel__transcript').evaluate((element) => { element.scrollTop = 0; });
+  const scrollHandle = await page.locator('.inkjet-scrollbar .element-scrollbar__handle').boundingBox();
+  await dragPointer(scrollHandle.x + scrollHandle.width / 2, scrollHandle.y + scrollHandle.height / 2, scrollHandle.x + scrollHandle.width / 2, scrollHandle.y + scrollHandle.height / 2 + 60);
+  assert.ok(
+    await page.locator('.inkjet-panel__transcript').evaluate((element) => element.scrollTop) > 0,
+    'dragging the overlay handle scrolls the transcript'
+  );
+  await page.locator('.inkjet-panel__transcript-wrap').evaluate((element) => { element.style.maxHeight = ''; });
+  await page.evaluate(() => { const element = window.document.activeElement; if (element && element !== window.document.body && typeof element.blur === 'function') element.blur(); });
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(40);
+  assert.equal(await page.locator('.page-wrapper').count(), pagesBeforeAgentTurn, 'a whole agent turn reverts with a single undo');
+  assert.equal(await page.locator('audio').count(), 0, 'undo removes the inserted audio page');
+  assert.equal(await page.locator('.document-title').inputValue(), titleBeforeAgentTurn, 'undo restores the document title');
+
+  // Stop: a runaway turn ends on the indicator's stop button and keeps partial work.
+  await page.getByLabel('Inkjet prompt').fill('slow drip until stopped');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() =>
+    document.querySelector('.workspace--agent-locked') &&
+    [...document.querySelectorAll('.text-block')].some((element) => element.textContent.includes('drip'))
+  );
+  // The agent's reasoning streams as a temporary, visually distinct thinking
+  // bubble (dashed frame, unlike a finished message's solid card).
+  await page.locator('.inkjet-entry--thinking').waitFor({ state: 'visible' });
+  assert.match(await page.locator('.inkjet-entry--thinking').innerText(), /Planning the slow drip/i, 'the panel streams the agent reasoning as thinking text');
+  assert.equal(
+    await page.locator('.inkjet-entry--thinking').evaluate((element) => getComputedStyle(element).borderTopStyle),
+    'dashed',
+    'thinking is styled distinctly from a finished message (dashed frame)'
+  );
+  await page.locator('.inkjet-turn-indicator').getByRole('button', { name: 'Stop' }).click();
+  await page.locator('.workspace--agent-locked').waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.inkjet-entry--thinking').count(), 0, 'thinking text is temporary — it clears when the turn ends');
+  const dripSurvivesStop = await page.evaluate(() => [...document.querySelectorAll('.text-block')].some((element) => element.textContent.includes('drip')));
+  assert.equal(dripSurvivesStop, true, 'stopping keeps whatever the agent already wrote');
+  await page.evaluate(() => { const element = window.document.activeElement; if (element && element !== window.document.body && typeof element.blur === 'function') element.blur(); });
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(40);
+  const dripSurvivesUndo = await page.evaluate(() => [...document.querySelectorAll('.text-block')].some((element) => element.textContent.includes('drip')));
+  assert.equal(dripSurvivesUndo, false, 'a stopped turn still reverts as one undo step');
+  assert.equal(await page.locator('.page-wrapper').count(), pagesBeforeAgentTurn, 'the stopped turn leaves no leftover pages after undo');
+  // "New session" returns to the provider screen.
+  await page.getByRole('button', { name: 'New session' }).click();
+  await page.getByRole('button', { name: 'Start session' }).waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: 'Inkjet panel' }).click();
+
+  const homeChangedViewNextFrame = await page.getByRole('button', { name: 'Back to inktiles' }).evaluate(async (button) => {
     button.click();
     await new Promise((resolve) => requestAnimationFrame(() => resolve()));
     return Boolean(document.querySelector('.library'));
   });
   assert.ok(homeChangedViewNextFrame, 'returning home changes view by the next animation frame');
-  await page.locator('.folio-card').waitFor({ state: 'visible' });
-  assert.match(await page.locator('.folio-card').first().innerText(), /Untitled Folio/i, 'the edited folio returns to the home library');
-  await page.screenshot({ path: 'folio-preview.png', fullPage: true });
+  await page.locator('.inktile-card[data-inktile-id]').waitFor({ state: 'visible' });
+  assert.match(await page.locator('.inktile-card[data-inktile-id]').first().innerText(), /Untitled Inktile/i, 'the edited inktile returns to the home library');
+  await page.screenshot({ path: 'inktile-preview.png', fullPage: true });
   assert.deepEqual(consoleErrors, [], `browser console errors: ${consoleErrors.join('\n')}`);
   console.log('Browser interaction smoke test passed.');
 } finally {

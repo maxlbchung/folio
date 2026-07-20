@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
+import { useDocument } from "../document/DocumentContext";
 import type { TextBlock } from "../document/types";
 
 interface TextBlockViewProps {
@@ -8,6 +9,7 @@ interface TextBlockViewProps {
 }
 
 export function TextBlockView({ block, onChange, onStartChange }: TextBlockViewProps) {
+  const { agentTurn } = useDocument();
   const ref = useRef<HTMLDivElement>(null);
   const startValue = useRef(block.html);
   const changeStarted = useRef(false);
@@ -22,7 +24,10 @@ export function TextBlockView({ block, onChange, onStartChange }: TextBlockViewP
     <div
       ref={ref}
       className="text-block"
-      contentEditable
+      // Read-only while an agent turn streams into the document: dropping
+      // contentEditable also releases focus, so the incoming agent HTML can
+      // render without fighting the caret.
+      contentEditable={!agentTurn}
       suppressContentEditableWarning
       data-placeholder="Start writing…"
       onFocus={() => { startValue.current = ref.current?.innerHTML ?? ""; changeStarted.current = false; }}

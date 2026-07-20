@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import { uuid } from "../document/factories";
 import type { VariantGroupBlock } from "../document/types";
-import { ChevronUp, ChevronDown, PlusIcon, TextIcon, TrashIcon } from "./icons";
+import { ChevronUp, ChevronDown, MinusIcon, PlusIcon, TextIcon } from "./icons";
 
 interface Props {
   block: VariantGroupBlock;
@@ -32,7 +32,7 @@ export function VariantBlockView({ block, onChange, onStartChange, onConvertToTe
           <button title="Previous version" onClick={() => changeIndex(-1)} aria-label="Previous version"><ChevronUp size={15} /></button>
           <span className="variant-progress" aria-label={`Version ${block.activeVariant + 1} of ${block.variants.length}`}>{block.activeVariant + 1}/{block.variants.length}</span>
           <button title="Next version" onClick={() => changeIndex(1)} aria-label="Next version"><ChevronDown size={15} /></button>
-          <button title="Use selected version as text page" aria-label="Use selected version as text page" onClick={onConvertToText}><TextIcon size={15} /></button>
+          <button title="Use selected version as text tile" aria-label="Use selected version as text tile" onClick={onConvertToText}><TextIcon size={15} /></button>
           <button title="Add version" aria-label="Add version" onClick={() => {
             const variants = [...block.variants, { id: uuid(), label: "", html: "" }];
             onChange({ ...block, variants, activeVariant: variants.length - 1 }, true);
@@ -41,7 +41,7 @@ export function VariantBlockView({ block, onChange, onStartChange, onConvertToTe
             if (block.variants.length === 1) return;
             const variants = block.variants.filter((_, index) => index !== block.activeVariant);
             onChange({ ...block, variants, activeVariant: Math.min(block.activeVariant, variants.length - 1) }, true);
-          }}><TrashIcon size={14} /></button>
+          }}><MinusIcon size={16} /></button>
       </aside>
         <div
           ref={editorRef}

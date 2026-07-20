@@ -1,0 +1,356 @@
+import { flushSync } from "react-dom";
+import type { DocumentContextValue } from "../document/DocumentContext";
+import { MIN_DRAWING_HEIGHT, uuid } from "../document/factories";
+import { detectMediaPageType } from "../document/mediaTypes";
+import type { DrawingStroke, InktileDocument, InktilePage, VariantGroupBlock } from "../document/types";
+import type {
+  AgentDocumentSnapshot,
+  AgentOp,
+  AgentOpErrorCode,
+  AgentOpResult,
+  AgentPageSnapshot,
+  AgentStroke
+} from "./protocol";
+
+const MIN_ROW_HEIGHT = 96;
+const MAX_ROW_HEIGHT = 1600;
+const MAX_VARIANTS = 20;
+const MAX_STROKES = 500;
+const MAX_STROKE_POINTS = 20000;
+
+export class AgentOpError extends Error {
+  code: AgentOpErrorCode;
+  constructor(code: AgentOpErrorCode, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+const notesHtml = (page: InktilePage): string | undefined => {
+  const block = page.back?.blocks.find((item) => item.type === "text");
+  return block && block.type === "text" ? block.html : undefined;
+};
+
+const pageSnapshot = (document: InktileDocument, page: InktilePage): AgentPageSnapshot => {
+  const shared: Partial<AgentPageSnapshot> = {
+    height: page.layoutHeight,
+    widthFraction: page.layoutWidthFraction,
+    align: page.verticalAlign,
+    notesHtml: notesHtml(page)
+  };
+  if (page.type === "drawing") {
+    return {
+      id: page.id,
+      component: "drawing",
+      ...shared,
+      drawing: { height: page.drawing?.height ?? MIN_DRAWING_HEIGHT, strokeCount: page.drawing?.strokes.length ?? 0 }
+    };
+  }
+  const block = page.front.blocks[0];
+  if (!block) return { id: page.id, component: "empty", ...shared };
+  if (block.type === "text") return { id: page.id, component: "text", html: block.html, ...shared };
+  if (block.type === "variants") {
+    return {
+      id: page.id,
+      component: "versions",
+      ...shared,
+      variants: block.variants.map((variant) => ({ label: variant.label, html: variant.html })),
+      activeVariant: block.activeVariant
+    };
+  }
+  if (block.type === "image" || block.type === "video" || block.type === "audio") {
+    const metadata = document.assets[block.assetId];
+    return {
+      id: page.id,
+      component: block.type,
+      ...shared,
+      alt: block.type === "image" ? block.alt : undefined,
+      asset: metadata
+        ? { id: metadata.id, filename: metadata.filename, mimeType: metadata.mimeType, byteLength: metadata.byteLength }
+        : undefined
+    };
+  }
+  return { id: page.id, component: "empty", ...shared };
+};
+
+const documentSnapshot = (document: InktileDocument): AgentDocumentSnapshot => ({
+  id: document.id,
+  title: document.title,
+  pageRows: document.pageRows.map((row) => [...row]),
+  pages: document.pageOrder
+    .map((pageId) => document.pages[pageId])
+    .filter((page): page is InktilePage => Boolean(page))
+    .map((page) => pageSnapshot(document, page))
+});
+
+const requireRevision = (baseRevision: number, context: DocumentContextValue) => {
+  if (baseRevision !== context.getRevision()) {
+    throw new AgentOpError("revision", `The document changed (expected revision ${baseRevision}, current ${context.getRevision()}). Call read_document and retry from current state.`);
+  }
+};
+
+const requirePage = (context: DocumentContextValue, pageId: string): InktilePage => {
+  const page = context.getDocumentSnapshot().pages[pageId];
+  if (!page) throw new AgentOpError("not-found", `No page with id ${pageId}.`);
+  return page;
+};
+
+const requireTextPage = (context: DocumentContextValue, pageId: string) => {
+  const page = requirePage(context, pageId);
+  const block = page.type === "standard" ? page.front.blocks[0] : undefined;
+  if (!block || block.type !== "text") {
+    throw new AgentOpError("invalid", `Page ${pageId} is not a text page; every page owns exactly one component.`);
+  }
+  return block;
+};
+
+const requireVersionsBlock = (context: DocumentContextValue, pageId: string): VariantGroupBlock => {
+  const page = requirePage(context, pageId);
+  const block = page.type === "standard" ? page.front.blocks[0] : undefined;
+  if (!block || block.type !== "variants") {
+    throw new AgentOpError("invalid", `Page ${pageId} is not a versions page.`);
+  }
+  return block;
+};
+
+const requireRow = (context: DocumentContextValue, pageId: string): string[] => {
+  requirePage(context, pageId);
+  const row = context.getDocumentSnapshot().pageRows.find((candidate) => candidate.includes(pageId));
+  if (!row) throw new AgentOpError("not-found", `Page ${pageId} is not placed in any row.`);
+  return [...row];
+};
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const sanitizeStrokes = (input: AgentStroke[]): DrawingStroke[] => {
+  if (!Array.isArray(input) || input.length === 0) throw new AgentOpError("invalid", "Provide at least one stroke.");
+  if (input.length > MAX_STROKES) throw new AgentOpError("invalid", `Too many strokes (limit ${MAX_STROKES}).`);
+  let totalPoints = 0;
+  return input.map((stroke) => {
+    const points = Array.isArray(stroke.points) ? stroke.points : [];
+    if (points.length < 2) throw new AgentOpError("invalid", "Each stroke needs at least two points.");
+    totalPoints += points.length;
+    if (totalPoints > MAX_STROKE_POINTS) throw new AgentOpError("invalid", `Too many points in total (limit ${MAX_STROKE_POINTS}).`);
+    const tool = stroke.tool === "highlighter" || stroke.tool === "eraser" ? stroke.tool : "pen";
+    return {
+      id: uuid(),
+      tool,
+      width: clamp(Number(stroke.width) || 3, 1, 24),
+      opacity: clamp(Number(stroke.opacity) || (tool === "highlighter" ? 0.45 : 1), 0.05, 1),
+      points: points.map((point) => ({
+        x: clamp(Number(point.x) || 0, 0, 1),
+        y: clamp(Number(point.y) || 0, 0, 1),
+        ...(point.pressure !== undefined ? { pressure: clamp(Number(point.pressure) || 0, 0, 1) } : {})
+      }))
+    };
+  });
+};
+
+const sanitizeVariants = (input: { label?: string; html: string }[]) => {
+  if (!Array.isArray(input) || input.length === 0) throw new AgentOpError("invalid", "Provide at least one version.");
+  if (input.length > MAX_VARIANTS) throw new AgentOpError("invalid", `Too many versions (limit ${MAX_VARIANTS}).`);
+  return input.map((variant) => ({
+    id: uuid(),
+    label: String(variant.label ?? "").slice(0, 80),
+    html: String(variant.html ?? "")
+  }));
+};
+
+const decodeBase64 = (data: string): Uint8Array => {
+  try {
+    const binary = atob(data);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  } catch {
+    throw new AgentOpError("invalid", "Media payload is not valid base64.");
+  }
+};
+
+/** Applies one broker-issued operation through the existing context mutations.
+ * Callers wrap this in `runAgentEdit`, so mutations pass the turn lock and are
+ * uniformly history-free; `flushSync` renders each op before the next arrives
+ * (live typing) and keeps `getDocumentSnapshot()` current for follow-up reads. */
+export async function applyAgentOp(op: AgentOp, context: DocumentContextValue): Promise<AgentOpResult> {
+  switch (op.kind) {
+    case "read_document": {
+      return { revision: context.getRevision(), document: documentSnapshot(context.getDocumentSnapshot()) };
+    }
+
+    case "set_title": {
+      requireRevision(op.baseRevision, context);
+      const title = String(op.title).trim().slice(0, 200);
+      if (!title) throw new AgentOpError("invalid", "The title cannot be empty.");
+      flushSync(() => context.updateTitle(title));
+      return { revision: context.getRevision() };
+    }
+
+    case "append_text": {
+      requireRevision(op.baseRevision, context);
+      const block = requireTextPage(context, op.pageId);
+      flushSync(() => context.updateBlock(op.pageId, "front", block.id, { html: block.html + op.html }));
+      return { revision: context.getRevision() };
+    }
+
+    case "edit_text": {
+      requireRevision(op.baseRevision, context);
+      const block = requireTextPage(context, op.pageId);
+      flushSync(() => context.updateBlock(op.pageId, "front", block.id, { html: op.html }));
+      return { revision: context.getRevision() };
+    }
+
+    case "edit_notes": {
+      requireRevision(op.baseRevision, context);
+      requirePage(context, op.pageId);
+      flushSync(() => context.setPageNotes(op.pageId, op.html));
+      return { revision: context.getRevision() };
+    }
+
+    case "insert_page": {
+      requireRevision(op.baseRevision, context);
+      if (op.afterPageId) requirePage(context, op.afterPageId);
+      let pageId = "";
+      flushSync(() => { pageId = context.addPage(op.afterPageId); });
+      if (op.html) {
+        const block = requireTextPage(context, pageId);
+        flushSync(() => context.updateBlock(pageId, "front", block.id, { html: op.html }));
+      }
+      return { revision: context.getRevision(), pageId };
+    }
+
+    case "delete_pages": {
+      requireRevision(op.baseRevision, context);
+      if (!Array.isArray(op.pageIds) || op.pageIds.length === 0) throw new AgentOpError("invalid", "Provide the ids of the pages to delete.");
+      op.pageIds.forEach((pageId) => requirePage(context, pageId));
+      flushSync(() => context.deletePages(op.pageIds));
+      return { revision: context.getRevision() };
+    }
+
+    case "arrange_pages": {
+      requireRevision(op.baseRevision, context);
+      const document = context.getDocumentSnapshot();
+      requirePage(context, op.pageId);
+      requirePage(context, op.targetPageId);
+      if (op.pageId === op.targetPageId) throw new AgentOpError("invalid", "A page cannot be arranged relative to itself.");
+      if (op.position === "left" || op.position === "right") {
+        const targetRow = document.pageRows.find((row) => row.includes(op.targetPageId));
+        const staying = targetRow?.filter((id) => id !== op.pageId).length ?? 0;
+        if (staying + 1 > 4) throw new AgentOpError("invalid", "A row holds at most four pages.");
+      }
+      flushSync(() => context.movePage(op.pageId, op.targetPageId, op.position));
+      return { revision: context.getRevision() };
+    }
+
+    case "set_row_height": {
+      requireRevision(op.baseRevision, context);
+      const row = requireRow(context, op.pageId);
+      const height = clamp(Math.round(Number(op.height) || 0), MIN_ROW_HEIGHT, MAX_ROW_HEIGHT);
+      flushSync(() => context.setPageRowHeight(row, height));
+      return { revision: context.getRevision() };
+    }
+
+    case "set_row_widths": {
+      requireRevision(op.baseRevision, context);
+      const row = requireRow(context, op.pageId);
+      if (row.length < 2) throw new AgentOpError("invalid", "The page is alone in its row; widths only apply to rows with two or more pages.");
+      if (!Array.isArray(op.fractions) || op.fractions.length !== row.length) {
+        throw new AgentOpError("invalid", `Provide exactly ${row.length} fractions for this row.`);
+      }
+      const raw = op.fractions.map((fraction) => Number(fraction));
+      if (raw.some((fraction) => !Number.isFinite(fraction) || fraction <= 0)) {
+        throw new AgentOpError("invalid", "Every fraction must be a positive number.");
+      }
+      const sum = raw.reduce((total, fraction) => total + fraction, 0);
+      const normalized = raw.map((fraction) => fraction / sum);
+      if (normalized.some((fraction) => fraction < 0.08)) {
+        throw new AgentOpError("invalid", "Each page needs at least 8% of the row width.");
+      }
+      flushSync(() => context.setRowWidthFractions(row, normalized));
+      return { revision: context.getRevision() };
+    }
+
+    case "set_vertical_align": {
+      requireRevision(op.baseRevision, context);
+      requirePage(context, op.pageId);
+      flushSync(() => context.setPageVerticalAlign(op.pageId, op.align));
+      return { revision: context.getRevision() };
+    }
+
+    case "create_drawing": {
+      requireRevision(op.baseRevision, context);
+      if (op.afterPageId) requirePage(context, op.afterPageId);
+      const strokes = sanitizeStrokes(op.strokes);
+      let pageId = "";
+      flushSync(() => { pageId = context.addPage(op.afterPageId, "drawing"); });
+      const page = requirePage(context, pageId);
+      const height = op.height !== undefined
+        ? clamp(Math.round(Number(op.height) || 0), MIN_DRAWING_HEIGHT, MAX_ROW_HEIGHT)
+        : page.drawing?.height ?? MIN_DRAWING_HEIGHT;
+      flushSync(() => {
+        context.updatePageDrawing(pageId, { id: page.drawing?.id ?? uuid(), type: "drawing", height, strokes });
+        context.setPageRowHeight([pageId], height);
+      });
+      return { revision: context.getRevision(), pageId };
+    }
+
+    case "edit_drawing": {
+      requireRevision(op.baseRevision, context);
+      const page = requirePage(context, op.pageId);
+      if (page.type !== "drawing" || !page.drawing) throw new AgentOpError("invalid", `Page ${op.pageId} is not a drawing page.`);
+      const strokes = sanitizeStrokes(op.strokes);
+      const combined = op.mode === "append" ? [...page.drawing.strokes, ...strokes] : strokes;
+      flushSync(() => context.updatePageDrawing(op.pageId, { ...page.drawing!, strokes: combined }));
+      return { revision: context.getRevision() };
+    }
+
+    case "insert_versions": {
+      requireRevision(op.baseRevision, context);
+      if (op.afterPageId) requirePage(context, op.afterPageId);
+      const variants = sanitizeVariants(op.variants);
+      const block: VariantGroupBlock = {
+        id: uuid(),
+        type: "variants",
+        activeVariant: clamp(Math.round(Number(op.activeIndex) || 0), 0, variants.length - 1),
+        variants
+      };
+      let pageId = "";
+      flushSync(() => { pageId = context.addBlockPage(block, op.afterPageId); });
+      return { revision: context.getRevision(), pageId };
+    }
+
+    case "edit_versions": {
+      requireRevision(op.baseRevision, context);
+      const block = requireVersionsBlock(context, op.pageId);
+      const variants = op.variants !== undefined ? sanitizeVariants(op.variants) : block.variants;
+      const activeVariant = op.activeIndex !== undefined
+        ? clamp(Math.round(Number(op.activeIndex) || 0), 0, variants.length - 1)
+        : clamp(block.activeVariant, 0, variants.length - 1);
+      flushSync(() => context.updateBlock(op.pageId, "front", block.id, { variants, activeVariant }));
+      return { revision: context.getRevision() };
+    }
+
+    case "convert_versions_to_text": {
+      requireRevision(op.baseRevision, context);
+      const block = requireVersionsBlock(context, op.pageId);
+      flushSync(() => context.convertVariantToText(op.pageId, "front", block.id));
+      return { revision: context.getRevision() };
+    }
+
+    case "insert_media": {
+      requireRevision(op.baseRevision, context);
+      if (op.afterPageId) requirePage(context, op.afterPageId);
+      const type = detectMediaPageType(op.mimeType, op.filename);
+      if (!type) throw new AgentOpError("invalid", `Unsupported media type ${op.mimeType}.`);
+      const bytes = decodeBase64(op.bytesBase64);
+      const file = new File([bytes as BlobPart], op.filename, { type: op.mimeType });
+      const assetId = await context.addAsset(file);
+      let pageId = "";
+      flushSync(() => {
+        if (type === "image") pageId = context.addBlockPage({ id: uuid(), type, assetId, height: 420, fit: "contain", alt: op.alt ?? op.filename }, op.afterPageId);
+        if (type === "video") pageId = context.addBlockPage({ id: uuid(), type, assetId, height: 420, fit: "contain", controls: true }, op.afterPageId);
+        if (type === "audio") pageId = context.addBlockPage({ id: uuid(), type, assetId, size: "compact" }, op.afterPageId);
+      });
+      return { revision: context.getRevision(), pageId, assetId };
+    }
+  }
+}

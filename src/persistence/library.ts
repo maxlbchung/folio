@@ -1,6 +1,7 @@
-import type { FolioDocument, RuntimeAssetMap } from "../document/types";
-import { decodeFolio, encodeFolio, type LoadedFolio } from "./folioArchive";
-import { LIBRARY_INDEX_STORE, LIBRARY_STORE, openFolioDb } from "./database";
+import type { InktileDocument, RuntimeAssetMap } from "../document/types";
+import { uuid } from "../document/factories";
+import { decodeInktile, encodeInktile, type LoadedInktile } from "./inktileArchive";
+import { LIBRARY_INDEX_STORE, LIBRARY_STORE, openInktileDb } from "./database";
 import { deleteAutosave, readAutosave } from "./autosave";
 
 interface LibraryRecord {
@@ -13,12 +14,13 @@ interface LibraryRecord {
   plainText: string;
   previewText: string;
   path: string | null;
+  pinned?: boolean;
   blob: Blob;
   snapshot?: StoredLibrarySnapshot;
 }
 
 interface StoredLibrarySnapshot {
-  document: FolioDocument;
+  document: InktileDocument;
   assetBlobs: Record<string, Blob>;
 }
 
@@ -32,7 +34,7 @@ export interface LibrarySearchResults {
   textMatches: Array<LibraryEntry & { frequency: number }>;
 }
 
-export interface LoadedLibraryFolio extends LoadedFolio {
+export interface LoadedLibraryInktile extends LoadedInktile {
   path: string | null;
 }
 
@@ -47,13 +49,18 @@ const completeTransaction = (transaction: IDBTransaction): Promise<void> => new 
   transaction.onabort = () => reject(transaction.error);
 });
 
+const BLOCK_BOUNDARY = /<\/(p|div|li|h[1-6]|blockquote|section|article|ul|ol|pre|tr|td|th|figure|figcaption)>/gi;
+
 const htmlToText = (html: string): string => {
   const container = window.document.createElement("div");
-  container.innerHTML = html;
+  // <br> and block-element boundaries carry no whitespace in textContent, so "a<div>b</div>" would
+  // read as "ab" — collapsing separate lines into one run. Insert a space at each boundary first so
+  // adjacent lines/blocks stay distinct words; search matching and readable excerpts depend on it.
+  container.innerHTML = html.replace(/<br\s*\/?>/gi, " ").replace(BLOCK_BOUNDARY, "$& ");
   return container.textContent ?? "";
 };
 
-export function documentPlainText(document: FolioDocument): string {
+export function documentPlainText(document: InktileDocument): string {
   const segments: string[] = [];
   for (const pageId of document.pageOrder) {
     const page = document.pages[pageId];
@@ -74,21 +81,21 @@ const summarize = (text: string): string => text.slice(0, 180).trim();
 
 const toEntry = ({ blob: _blob, snapshot: _snapshot, ...entry }: LibraryRecord): LibraryEntry => entry;
 
-interface CachedLibraryFolio {
+interface CachedLibraryInktile {
   entry: LibraryEntry;
   snapshot?: StoredLibrarySnapshot;
 }
 
-const libraryCache = new Map<string, CachedLibraryFolio>();
+const libraryCache = new Map<string, CachedLibraryInktile>();
 let libraryIndexLoaded = false;
 let libraryIndexLoad: Promise<void> | null = null;
 
-const createStoredSnapshot = (document: FolioDocument, assets: RuntimeAssetMap): StoredLibrarySnapshot => ({
+const createStoredSnapshot = (document: InktileDocument, assets: RuntimeAssetMap): StoredLibrarySnapshot => ({
   document: structuredClone(document),
   assetBlobs: Object.fromEntries(Object.entries(assets).map(([id, asset]) => [id, asset.blob]))
 });
 
-const loadStoredSnapshot = (snapshot: StoredLibrarySnapshot): LoadedFolio => {
+const loadStoredSnapshot = (snapshot: StoredLibrarySnapshot): LoadedInktile => {
   const document = structuredClone(snapshot.document);
   const assets: RuntimeAssetMap = {};
   Object.values(document.assets).forEach((metadata) => {
@@ -117,8 +124,8 @@ const rememberRecord = (record: LibraryRecord) => {
   }
 };
 
-const stageLibraryFolio = (
-  document: FolioDocument,
+const stageLibraryInktile = (
+  document: InktileDocument,
   assets: RuntimeAssetMap,
   path: string | null,
   touchOpened: boolean
@@ -127,24 +134,25 @@ const stageLibraryFolio = (
   const plainText = documentPlainText(document);
   const entry: LibraryEntry = {
     id: document.id,
-    title: document.title.trim() || "Untitled Folio",
+    title: document.title.trim() || "Untitled Inktile",
     createdAt: document.createdAt,
     modifiedAt: document.modifiedAt,
     lastOpenedAt: touchOpened ? new Date().toISOString() : cached?.entry.lastOpenedAt ?? document.createdAt,
     pageCount: document.pageOrder.length,
     plainText,
     previewText: summarize(plainText),
-    path: path ?? cached?.entry.path ?? null
+    path: path ?? cached?.entry.path ?? null,
+    pinned: cached?.entry.pinned ?? false
   };
   const snapshot = createStoredSnapshot(document, assets);
   if (!cached || cached.entry.modifiedAt <= entry.modifiedAt) libraryCache.set(document.id, { entry, snapshot });
   return { entry, snapshot };
 };
 
-export async function listLibraryFolios(): Promise<LibraryEntry[]> {
+export async function listLibraryInktiles(): Promise<LibraryEntry[]> {
   if (!libraryIndexLoaded) {
     libraryIndexLoad ??= (async () => {
-      const database = await openFolioDb();
+      const database = await openInktileDb();
       try {
         const transaction = database.transaction(LIBRARY_INDEX_STORE, "readonly");
         const entries = await requestResult(transaction.objectStore(LIBRARY_INDEX_STORE).getAll() as IDBRequest<LibraryEntry[]>);
@@ -163,15 +171,15 @@ interface SaveLibraryOptions {
   touchOpened?: boolean;
 }
 
-export async function saveLibraryFolio(
-  document: FolioDocument,
+export async function saveLibraryInktile(
+  document: InktileDocument,
   assets: RuntimeAssetMap,
   path: string | null = null,
   options: SaveLibraryOptions = {}
 ): Promise<LibraryEntry> {
-  const staged = stageLibraryFolio(document, assets, path, options.touchOpened === true);
-  const blob = await encodeFolio(document, assets);
-  const database = await openFolioDb();
+  const staged = stageLibraryInktile(document, assets, path, options.touchOpened === true);
+  const blob = await encodeInktile(document, assets);
+  const database = await openInktileDb();
   try {
     const transaction = database.transaction([LIBRARY_STORE, LIBRARY_INDEX_STORE], "readwrite");
     const transactionComplete = completeTransaction(transaction);
@@ -189,6 +197,8 @@ export async function saveLibraryFolio(
       rememberRecord(existing);
       return toEntry(existing);
     }
+    // A save staged before the library index warmed the cache must not drop an existing pin.
+    if (existing?.pinned && !staged.entry.pinned) staged.entry.pinned = true;
     const record: LibraryRecord = {
       ...staged.entry,
       lastOpenedAt: staged.entry.lastOpenedAt,
@@ -206,14 +216,14 @@ export async function saveLibraryFolio(
   }
 }
 
-export function getCachedLibraryFolio(id: string): LoadedLibraryFolio | null {
+export function getCachedLibraryInktile(id: string): LoadedLibraryInktile | null {
   const cached = libraryCache.get(id);
   if (!cached?.snapshot) return null;
   return { ...loadStoredSnapshot(cached.snapshot), path: cached.entry.path };
 }
 
-export async function touchLibraryFolio(id: string): Promise<void> {
-  const database = await openFolioDb();
+export async function touchLibraryInktile(id: string): Promise<void> {
+  const database = await openInktileDb();
   try {
     const transaction = database.transaction(LIBRARY_INDEX_STORE, "readwrite");
     const transactionComplete = completeTransaction(transaction);
@@ -232,8 +242,33 @@ export async function touchLibraryFolio(id: string): Promise<void> {
   }
 }
 
+export async function setLibraryInktilePinned(id: string, pinned: boolean): Promise<void> {
+  const cached = libraryCache.get(id);
+  if (cached) cached.entry.pinned = pinned;
+  const database = await openInktileDb();
+  try {
+    const transaction = database.transaction([LIBRARY_STORE, LIBRARY_INDEX_STORE], "readwrite");
+    const transactionComplete = completeTransaction(transaction);
+    const store = transaction.objectStore(LIBRARY_STORE);
+    const indexStore = transaction.objectStore(LIBRARY_INDEX_STORE);
+    const record = await requestResult(store.get(id) as IDBRequest<LibraryRecord | undefined>);
+    if (record) {
+      record.pinned = pinned;
+      store.put(record);
+    }
+    const entry = await requestResult(indexStore.get(id) as IDBRequest<LibraryEntry | undefined>);
+    if (entry) {
+      entry.pinned = pinned;
+      indexStore.put(entry);
+    }
+    await transactionComplete;
+  } finally {
+    database.close();
+  }
+}
+
 const persistStoredSnapshot = async (id: string, modifiedAt: string, snapshot: StoredLibrarySnapshot): Promise<void> => {
-  const database = await openFolioDb();
+  const database = await openInktileDb();
   try {
     const transaction = database.transaction(LIBRARY_STORE, "readwrite");
     const transactionComplete = completeTransaction(transaction);
@@ -249,10 +284,10 @@ const persistStoredSnapshot = async (id: string, modifiedAt: string, snapshot: S
   }
 };
 
-export async function openLibraryFolio(id: string): Promise<LoadedLibraryFolio | null> {
-  const cached = getCachedLibraryFolio(id);
+export async function openLibraryInktile(id: string): Promise<LoadedLibraryInktile | null> {
+  const cached = getCachedLibraryInktile(id);
   if (cached) return cached;
-  const database = await openFolioDb();
+  const database = await openInktileDb();
   try {
     const transaction = database.transaction(LIBRARY_STORE, "readonly");
     const store = transaction.objectStore(LIBRARY_STORE);
@@ -261,7 +296,7 @@ export async function openLibraryFolio(id: string): Promise<LoadedLibraryFolio |
     rememberRecord(record);
     if (record.snapshot) return { ...loadStoredSnapshot(record.snapshot), path: record.path };
 
-    const loaded = await decodeFolio(record.blob);
+    const loaded = await decodeInktile(record.blob);
     const snapshot = createStoredSnapshot(loaded.document, loaded.assets);
     libraryCache.set(id, { entry: toEntry(record), snapshot });
     void persistStoredSnapshot(id, record.modifiedAt, snapshot).catch(() => undefined);
@@ -271,9 +306,9 @@ export async function openLibraryFolio(id: string): Promise<LoadedLibraryFolio |
   }
 }
 
-export async function deleteLibraryFolio(id: string): Promise<void> {
+export async function deleteLibraryInktile(id: string): Promise<void> {
   libraryCache.delete(id);
-  const database = await openFolioDb();
+  const database = await openInktileDb();
   try {
     const transaction = database.transaction([LIBRARY_STORE, LIBRARY_INDEX_STORE], "readwrite");
     const transactionComplete = completeTransaction(transaction);
@@ -293,9 +328,9 @@ export async function deleteLibraryFolio(id: string): Promise<void> {
   }
 }
 
-export async function renameLibraryFolio(id: string, title: string): Promise<LibraryEntry | null> {
-  const nextTitle = title.trim() || "Untitled Folio";
-  const database = await openFolioDb();
+export async function renameLibraryInktile(id: string, title: string): Promise<LibraryEntry | null> {
+  const nextTitle = title.trim() || "Untitled Inktile";
+  const database = await openInktileDb();
   let record: LibraryRecord | undefined;
   try {
     const transaction = database.transaction(LIBRARY_STORE, "readonly");
@@ -305,13 +340,43 @@ export async function renameLibraryFolio(id: string, title: string): Promise<Lib
   }
   if (!record) return null;
 
-  const loaded = getCachedLibraryFolio(id)
+  const loaded = getCachedLibraryInktile(id)
     ?? (record.snapshot ? { ...loadStoredSnapshot(record.snapshot), path: record.path } : null)
-    ?? { ...(await decodeFolio(record.blob)), path: record.path };
+    ?? { ...(await decodeInktile(record.blob)), path: record.path };
   loaded.document.title = nextTitle;
   loaded.document.modifiedAt = new Date().toISOString();
   try {
-    return await saveLibraryFolio(loaded.document, loaded.assets, record.path);
+    return await saveLibraryInktile(loaded.document, loaded.assets, record.path);
+  } finally {
+    Object.values(loaded.assets).forEach((asset) => URL.revokeObjectURL(asset.url));
+  }
+}
+
+export async function duplicateLibraryInktile(id: string): Promise<LibraryEntry | null> {
+  const database = await openInktileDb();
+  let record: LibraryRecord | undefined;
+  try {
+    const transaction = database.transaction(LIBRARY_STORE, "readonly");
+    record = await requestResult(transaction.objectStore(LIBRARY_STORE).get(id) as IDBRequest<LibraryRecord | undefined>);
+  } finally {
+    database.close();
+  }
+  if (!record) return null;
+
+  const loaded = getCachedLibraryInktile(id)
+    ?? (record.snapshot ? { ...loadStoredSnapshot(record.snapshot), path: record.path } : null)
+    ?? { ...(await decodeInktile(record.blob)), path: record.path };
+  const now = new Date().toISOString();
+  const duplicate: InktileDocument = {
+    ...structuredClone(loaded.document),
+    id: uuid(),
+    title: `${loaded.document.title.trim() || "Untitled Inktile"} copy`,
+    createdAt: now,
+    modifiedAt: now
+  };
+  try {
+    // A copy is a fresh library-only inktile, not tied to the source's external file path.
+    return await saveLibraryInktile(duplicate, loaded.assets, null, { touchOpened: true });
   } finally {
     Object.values(loaded.assets).forEach((asset) => URL.revokeObjectURL(asset.url));
   }
@@ -322,7 +387,7 @@ const compareValues = (left: string, right: string): number => left.localeCompar
   sensitivity: "base"
 });
 
-export function sortLibraryFolios(entries: LibraryEntry[], sort: LibrarySort, direction: SortDirection): LibraryEntry[] {
+export function sortLibraryInktiles(entries: LibraryEntry[], sort: LibrarySort, direction: SortDirection): LibraryEntry[] {
   const multiplier = direction === "ascending" ? 1 : -1;
   return [...entries].sort((left, right) => {
     const comparison = compareValues(left[sort], right[sort]);
@@ -332,15 +397,16 @@ export function sortLibraryFolios(entries: LibraryEntry[], sort: LibrarySort, di
 
 const escapedRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+// Count case-insensitive substring occurrences. Matching is deliberately substring-based rather
+// than whole-word so body search behaves like the title search (which uses `includes`) and the
+// home view's excerpt jump/highlight: typing "note" surfaces "notebook", not just a lone "note".
 export function countTextMatches(text: string, query: string): number {
   const normalized = query.trim();
   if (!normalized) return 0;
-  const singleWord = /^[\p{L}\p{N}_'-]+$/u.test(normalized);
-  const pattern = singleWord ? `\\b${escapedRegExp(normalized)}\\b` : escapedRegExp(normalized);
-  return text.match(new RegExp(pattern, "giu"))?.length ?? 0;
+  return text.match(new RegExp(escapedRegExp(normalized), "giu"))?.length ?? 0;
 }
 
-export function searchLibraryFolios(
+export function searchLibraryInktiles(
   entries: LibraryEntry[],
   query: string,
   sort: LibrarySort,
@@ -349,7 +415,7 @@ export function searchLibraryFolios(
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return { titleMatches: [], textMatches: [] };
 
-  const titleMatches = sortLibraryFolios(
+  const titleMatches = sortLibraryInktiles(
     entries.filter((entry) => entry.title.toLocaleLowerCase().includes(normalized)),
     sort,
     direction

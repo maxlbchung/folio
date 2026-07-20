@@ -1,18 +1,19 @@
 {
-  "name": "folio-editor",
+  "name": "inktile-editor",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build --configLoader native",
     "preview": "vite preview",
     "tauri": "tauri",
     "check:docs": "node scripts/check-docs.mjs",
-    "check": "npm run check:docs && npm run build && npm run test:archive && node --check scripts/ui-smoke.mjs",
+    "check": "npm run check:docs && npm run build && npm run test:archive && npm run check:agent && node --check scripts/ui-smoke.mjs",
     "test:archive": "tsx scripts/archive-smoke.ts",
-    "test:ui": "esbuild src/main.tsx --bundle --format=iife --platform=browser --target=chrome120 --jsx=automatic --outfile=dist-smoke/app.js && node scripts/copy-smoke-css.mjs && node scripts/ui-smoke.mjs",
+    "test:ui": "esbuild src/main.tsx --bundle --format=iife --platform=browser --target=chrome120 --jsx=automatic --outfile=dist-smoke-current/app.js && node scripts/ui-smoke.mjs",
     "test": "npm run build && npm run test:archive && npm run test:ui",
+    "check:agent": "tsc -p agent",
     "hooks:install": "node scripts/install-hooks.mjs",
     "release:desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-desktop.ps1"
   },

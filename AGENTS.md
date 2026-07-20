@@ -1,10 +1,10 @@
-# Folio agent instructions
+# Inktile agent instructions
 
 These instructions apply to the entire repository.
 
 ## Start here
 
-1. Read `skills/folio-app/SKILL.md` completely for Folio implementation, debugging, testing, persistence, or release work.
+1. Read `skills/inktile-app/SKILL.md` completely for Inktile implementation, debugging, testing, persistence, or release work.
 2. Read only the reference needed for the task:
    - `docs/PRODUCT_INVARIANTS.md` for any UI, layout, drag, resize, text, drawing, or control-rail change.
    - `docs/ARCHITECTURE.md` for state flow, component ownership, and likely edit locations.
@@ -21,8 +21,8 @@ These instructions apply to the entire repository.
 - Keep left and right rails outside document width and ordered by page order.
 - Keep new documents empty and placeholders non-persistent.
 - Preserve stable text selection/caret behavior and compact text/version spacing.
-- Legacy and backward compatibility are not project requirements. Prefer the simplest implementation for the current app; breaking old `.folio` files, IndexedDB data, or retired shapes is acceptable unless the user explicitly requests compatibility for a specific change.
-- Native Save overwrites `currentPath`; Save As is the only normal path-changing action.
+- Legacy and backward compatibility are not project requirements. Prefer the simplest implementation for the current app; breaking old `.inktile` files, IndexedDB data, or retired shapes is acceptable unless the user explicitly requests compatibility for a specific change.
+- Editing autosaves to the library and, natively, to `currentPath` (atomic temp-file-and-rename); Save As is the only normal path-changing action and Export/Save As the only file-creating one.
 
 ## Change workflow
 
@@ -36,6 +36,7 @@ These instructions apply to the entire repository.
 
 - Documentation-only: `npm run check:docs`.
 - TypeScript, state, archive, or non-visual changes: `npm run check`.
+- Broker (`agent/*.mjs`) or `src/agent` protocol changes: `npm run check:agent` (also included in `npm run check`).
 - UI/interaction changes: run `npm run test:ui` in addition to `npm run check` and inspect the app when a browser runtime is available.
 - Shippable desktop changes: run `npm run release:desktop` after other checks.
 - Do not claim the UI suite ran if only `node --check scripts/ui-smoke.mjs` ran. Record environmental failures precisely.
@@ -44,5 +45,5 @@ These instructions apply to the entire repository.
 ## Generated and release files
 
 - `dist/`, `dist-smoke/`, `src-tauri/target/`, and TypeScript build info are generated.
-- Root `Folio.exe` and the portable ZIP are release deliverables, not source.
+- Root `Inktile.exe` and the portable ZIP are release deliverables, not source.
 - Never hand-edit archive contents or generated bundles.
