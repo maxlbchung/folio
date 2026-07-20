@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="inktile-logo-and-title.png" alt="Inktile — Build ideas tile by tile." width="900">
+  <img src="inktile-logo-and-title.png" alt="Inktile — Build ideas tile by tile." width="450">
 
   Notes, drafts, references, and media in flexible documents that stay on your machine.
 
@@ -25,13 +25,11 @@
   <img src="flower-screenshot.png" alt="Inktile's editor with the Inkjet panel open: a Claude session where the agent added a drawing tile and drew a flower stroke by stroke" width="960">
 </div>
 
-## The short version
+## Elevator Pitch
 
-Inktile is a local-first knowledge store and writing workspace. Use it for meeting notes, research, project thinking, personal records, rough drafts, or anything you would normally scatter across Google Docs, Word, notes apps, and folders.
+Inktile is a modular document editor, where you arrange cells with various content types. It functions as a freeform document canvas enabling more creative layouts and designs, while still retaining the classic document shape for more traditional document work.
 
-It gives those things one durable home: searchable inktiles made from text, versions, drawings, images, video, and audio. An inktile can be tidy like a finished document or loose like a desk covered in working notes.
-
-Your documents and media stay on your machine. Browser development uses IndexedDB and file pickers; the shipped Windows app uses the native filesystem through Tauri.
+Inkjet, Inktiles agent-runner, allows you to use your existing coding agent CLIs through the application, exposing them to documentation and MCP tools. This means zero setup on Inktile's side: no API keys, no ports, no MCP wiring.
 
 ## What makes Inktile different
 
