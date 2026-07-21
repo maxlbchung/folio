@@ -14,6 +14,19 @@ export const mediaMimeTypes: Record<MediaPageType, Set<string>> = {
   audio: new Set(["audio/aac", "audio/flac", "audio/m4a", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/opus", "audio/wav", "audio/webm", "audio/x-m4a", "audio/x-wav"])
 };
 
+/** Best-effort MIME for files that arrive without type metadata (native OS drops read
+ * from disk by path). Media elements need the Blob typed to render reliably. */
+const extensionMimes: Record<string, string> = {
+  avif: "image/avif", bmp: "image/bmp", gif: "image/gif", jpeg: "image/jpeg", jpg: "image/jpeg",
+  png: "image/png", svg: "image/svg+xml", webp: "image/webp",
+  m4v: "video/mp4", mov: "video/quicktime", mp4: "video/mp4", ogv: "video/ogg", webm: "video/webm",
+  aac: "audio/aac", flac: "audio/flac", m4a: "audio/x-m4a", mp3: "audio/mpeg", ogg: "audio/ogg",
+  opus: "audio/opus", wav: "audio/wav"
+};
+
+export const mimeForMediaFilename = (filename: string): string =>
+  extensionMimes[filename.split(".").pop()?.toLowerCase() ?? ""] ?? "";
+
 export const detectMediaPageType = (mimeType: string, filename = ""): MediaPageType | null => {
   const mime = mimeType.toLowerCase();
   const extension = filename.split(".").pop()?.toLowerCase() ?? "";

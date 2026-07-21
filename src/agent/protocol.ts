@@ -33,9 +33,10 @@ export interface AgentPageSnapshot {
   /** Versions pages: every draft plus which one is showing. */
   variants?: { label: string; html: string }[];
   activeVariant?: number;
-  /** Drawing pages: canvas height and how many strokes exist (stroke data
-   * itself stays in the app; edit_drawing appends or replaces). */
-  drawing?: { height: number; strokeCount: number };
+  /** Drawing pages: canvas height plus per-stroke summaries in paint order
+   * (erasers only affect ink painted before them). read_drawing returns the
+   * full point data; modify_strokes/delete_strokes edit strokes by id. */
+  drawing?: { height: number; strokeCount: number; strokes: AgentStrokeSummary[] };
 }
 
 /** An agent-authored drawing stroke: normalized 0..1 coordinates. */
@@ -44,6 +45,27 @@ export interface AgentStroke {
   width?: number;
   opacity?: number;
   points: { x: number; y: number; pressure?: number }[];
+}
+
+/** Compact per-stroke view carried in the document snapshot (bounds are
+ * normalized 0..1, rounded to two decimals). */
+export interface AgentStrokeSummary {
+  id: string;
+  tool: "pen" | "highlighter" | "eraser";
+  width: number;
+  opacity: number;
+  pointCount: number;
+  bounds: { x0: number; y0: number; x1: number; y1: number };
+}
+
+/** Full stroke data returned by read_drawing (points normalized 0..1,
+ * rounded to three decimals; pressure omitted). */
+export interface AgentStrokeDetail {
+  id: string;
+  tool: "pen" | "highlighter" | "eraser";
+  width: number;
+  opacity: number;
+  points: { x: number; y: number }[];
 }
 
 export interface AgentDocumentSnapshot {
@@ -72,6 +94,11 @@ export type AgentOp =
   | { kind: "set_vertical_align"; pageId: string; align: "top" | "center" | "bottom"; baseRevision: number }
   | { kind: "create_drawing"; afterPageId?: string; height?: number; strokes: AgentStroke[]; baseRevision: number }
   | { kind: "edit_drawing"; pageId: string; strokes: AgentStroke[]; mode: "replace" | "append"; baseRevision: number }
+  | { kind: "read_drawing"; pageId: string }
+  | { kind: "delete_strokes"; pageId: string; strokeIds: string[]; baseRevision: number }
+  /** Translate (dx/dy), scale (about originX/originY, default the selection's
+   * bounding-box center), and/or restyle (tool/width/opacity) strokes by id. */
+  | { kind: "modify_strokes"; pageId: string; strokeIds: string[]; dx?: number; dy?: number; scale?: number; originX?: number; originY?: number; tool?: "pen" | "highlighter" | "eraser"; width?: number; opacity?: number; baseRevision: number }
   | { kind: "insert_versions"; afterPageId?: string; variants: { label?: string; html: string }[]; activeIndex?: number; baseRevision: number }
   | { kind: "edit_versions"; pageId: string; variants?: { label?: string; html: string }[]; activeIndex?: number; baseRevision: number }
   | { kind: "convert_versions_to_text"; pageId: string; baseRevision: number }
@@ -85,6 +112,10 @@ export interface AgentOpResult {
   document?: AgentDocumentSnapshot;
   pageId?: string;
   assetId?: string;
+  /** set_row_height: the applied height after clamping to the row's allowed range. */
+  height?: number;
+  /** read_drawing payload: canvas geometry plus every stroke in paint order. */
+  drawing?: { height: number; widthPx: number; strokes: AgentStrokeDetail[] };
 }
 
 export interface AgentModelOption {

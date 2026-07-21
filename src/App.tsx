@@ -6,6 +6,8 @@ import { PageStack } from "./components/PageStack";
 import { TileSelectionProvider } from "./components/TileSelectionContext";
 import { InkjetPanel } from "./components/InkjetPanel";
 import { EditorContextMenu } from "./components/EditorContextMenu";
+import { LinkPreviewHost } from "./components/LinkPreview";
+import { MathEditorHost } from "./components/MathEditor";
 import { TextContextMenu } from "./components/TextContextMenu";
 import { WorkspaceScrollbar } from "./components/WorkspaceScrollbar";
 import { readAutosave, writeAutosave } from "./persistence/autosave";
@@ -21,6 +23,7 @@ import {
   writePreferences,
   type AppPreferences
 } from "./persistence/preferences";
+import { getStorage, storageIsEvictable } from "./persistence/storage";
 import "./styles/app.css";
 
 /** Force the Tauri window shut, bypassing the close-request guard below (no-op on web). */
@@ -44,7 +47,23 @@ function EditorApp() {
   // held behind a confirmation dialog; this records where the interrupted leave was headed.
   const [pendingExit, setPendingExit] = useState<PendingExit | null>(null);
   const [resolvingExit, setResolvingExit] = useState(false);
+  // True while the library sits in evictable storage: a browser that refused persist(),
+  // or a desktop shell whose file store failed and fell back to IndexedDB.
+  const [storageAtRisk, setStorageAtRisk] = useState(false);
   const initialized = useRef(false);
+
+  useEffect(() => {
+    if (window.__TAURI_INTERNALS__) {
+      // Desktop stores real files; at risk only if that failed and storage fell back.
+      void getStorage().then(() => setStorageAtRisk(storageIsEvictable())).catch(() => undefined);
+      return;
+    }
+    if (!navigator.storage?.persist) return;
+    void navigator.storage.persisted()
+      .then((persisted) => persisted || navigator.storage.persist())
+      .then((persisted) => setStorageAtRisk(!persisted))
+      .catch(() => undefined);
+  }, []);
 
   const updatePreferences = useCallback((patch: Partial<AppPreferences>) => {
     setPreferences((current) => {
@@ -72,6 +91,11 @@ function EditorApp() {
     root.style.setProperty("--ui-scale", String(preferences.uiScale));
     root.style.setProperty("--ui-scale-inverse", String(1 / preferences.uiScale));
   }, [preferences.uiScale]);
+
+  // Editor tile handles read their rest opacity from this attribute (see .page-handle in app.css).
+  useLayoutEffect(() => {
+    window.document.documentElement.dataset.handles = preferences.handleVisibility;
+  }, [preferences.handleVisibility]);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -287,6 +311,15 @@ function EditorApp() {
         <div className="library-boot" role="status"><img src="./inktile-logo.png" alt="" aria-hidden="true" /><p>Opening Inktile…</p></div>
       ) : view === "library" ? (
         <>
+          {storageAtRisk && (
+            <div className="storage-warning" role="alert">
+              <p>
+                Inktile couldn’t get durable storage here, so the library may be cleared if disk
+                space runs low. Keep copies of important inktiles with Export.
+              </p>
+              <button onClick={() => setStorageAtRisk(false)} aria-label="Dismiss storage warning">×</button>
+            </div>
+          )}
           <InktileHome
             refreshToken={libraryRevision}
             preferences={preferences}
@@ -301,18 +334,22 @@ function EditorApp() {
         </>
       ) : (
         <>
-          <Toolbar
-            onStatus={setStatus}
-            onHome={showLibrary}
-            onNewDocument={createNewInktile}
-            onOpenDocument={openExternalInktile}
-            onSave={persistEditorState}
-          />
+          {/* The toolbar sits inside the tile-selection provider so its formatting
+              commands can target a multi-tile selection. */}
           <TileSelectionProvider onStatus={setStatus}>
+            <Toolbar
+              onStatus={setStatus}
+              onHome={showLibrary}
+              onNewDocument={createNewInktile}
+              onOpenDocument={openExternalInktile}
+              onSave={persistEditorState}
+            />
             <PageStack />
             <EditorContextMenu onStatus={setStatus} />
           </TileSelectionProvider>
           <InkjetPanel />
+          <MathEditorHost />
+          <LinkPreviewHost />
           <WorkspaceScrollbar />
         </>
       )}

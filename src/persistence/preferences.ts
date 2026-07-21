@@ -1,24 +1,29 @@
 export type ThemePreference = "system" | "light" | "dark";
 export type UiScale = 0.8 | 0.9 | 1 | 1.1 | 1.2;
 export type CardSize = "small" | "medium" | "large";
+/** Editor tile-handle rest state: always opaque, faded until hover, or invisible until hover. */
+export type HandleVisibility = "full" | "ghost" | "hidden";
 
 export interface AppPreferences {
   theme: ThemePreference;
   uiScale: UiScale;
   cardSize: CardSize;
   autosave: boolean;
+  handleVisibility: HandleVisibility;
 }
 
 const PREFERENCES_KEY = "inktile-preferences";
 const UI_SCALES = new Set<UiScale>([0.8, 0.9, 1, 1.1, 1.2]);
 const THEMES = new Set<ThemePreference>(["system", "light", "dark"]);
 const CARD_SIZES = new Set<CardSize>(["small", "medium", "large"]);
+const HANDLE_VISIBILITIES = new Set<HandleVisibility>(["full", "ghost", "hidden"]);
 
 export const DEFAULT_PREFERENCES: AppPreferences = {
   theme: "system",
   uiScale: 1,
   cardSize: "medium",
-  autosave: true
+  autosave: true,
+  handleVisibility: "ghost"
 };
 
 export function readPreferences(): AppPreferences {
@@ -28,7 +33,10 @@ export function readPreferences(): AppPreferences {
       theme: stored?.theme && THEMES.has(stored.theme) ? stored.theme : DEFAULT_PREFERENCES.theme,
       uiScale: stored?.uiScale && UI_SCALES.has(stored.uiScale) ? stored.uiScale : DEFAULT_PREFERENCES.uiScale,
       cardSize: stored?.cardSize && CARD_SIZES.has(stored.cardSize) ? stored.cardSize : DEFAULT_PREFERENCES.cardSize,
-      autosave: typeof stored?.autosave === "boolean" ? stored.autosave : DEFAULT_PREFERENCES.autosave
+      autosave: typeof stored?.autosave === "boolean" ? stored.autosave : DEFAULT_PREFERENCES.autosave,
+      handleVisibility: stored?.handleVisibility && HANDLE_VISIBILITIES.has(stored.handleVisibility)
+        ? stored.handleVisibility
+        : DEFAULT_PREFERENCES.handleVisibility
     };
   } catch {
     return DEFAULT_PREFERENCES;

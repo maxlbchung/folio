@@ -1,4 +1,5 @@
 import { safeBaseName } from "./fileSystem";
+import { collectKatexCss, renderMathInHtml } from "../utils/mathField";
 import type {
   Block, DrawingBlock, DrawingStroke, InktileDocument, InktilePage, PageFace, RuntimeAssetMap
 } from "../document/types";
@@ -16,8 +17,35 @@ const pagesInOrder = (document: InktileDocument): InktilePage[] =>
 // Tags that end a line in contentEditable output (divs from Enter, lists, headings).
 const BLOCK_TAG = /^(DIV|P|LI|UL|OL|H[1-6]|BLOCKQUOTE|PRE|TABLE|TR)$/;
 
+/** A table cell (or other container) flattened to a single line of text. */
+const inlineCellText = (element: Element): string => {
+  const chunk: string[] = [];
+  const visit = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      chunk.push(node.textContent ?? "");
+      return;
+    }
+    if (!(node instanceof Element)) return;
+    if (node.tagName === "BR") {
+      chunk.push(" ");
+      return;
+    }
+    if (BLOCK_TAG.test(node.tagName)) chunk.push(" ");
+    node.childNodes.forEach(visit);
+    if (BLOCK_TAG.test(node.tagName)) chunk.push(" ");
+  };
+  element.childNodes.forEach(visit);
+  return chunk.join("").replace(/\s+/g, " ").trim();
+};
+
 const htmlToText = (html: string): string => {
   const body = new DOMParser().parseFromString(html, "text/html").body;
+  // Math fields keep only their TeX source in the document; export it in TeX delimiters.
+  for (const field of Array.from(body.querySelectorAll("[data-tex]"))) {
+    const tex = field.getAttribute("data-tex") ?? "";
+    const display = field.getAttribute("data-display") === "true";
+    field.replaceWith(body.ownerDocument.createTextNode(display ? `$$${tex}$$` : `$${tex}$`));
+  }
   const parts: string[] = [];
   const endsWithBreak = () => parts.length === 0 || parts[parts.length - 1].endsWith("\n");
   const walk = (node: Node) => {
@@ -30,8 +58,31 @@ const htmlToText = (html: string): string => {
       parts.push("\n");
       return;
     }
+    if (node.tagName === "HR") {
+      if (!endsWithBreak()) parts.push("\n");
+      parts.push("---\n");
+      return;
+    }
+    if (node.tagName === "TR") {
+      // One line per table row, pipe-separated cells.
+      if (!endsWithBreak()) parts.push("\n");
+      const cells = Array.from(node.children).filter((child) => /^(TD|TH)$/.test(child.tagName));
+      parts.push(`${cells.map(inlineCellText).join(" | ")}\n`);
+      return;
+    }
+    if (node.tagName === "A") {
+      // Keep the destination visible in plain text unless the text already is the URL.
+      const text = inlineCellText(node);
+      const href = node.getAttribute("href") ?? "";
+      parts.push(text);
+      if (href && href !== text) parts.push(` (${href})`);
+      return;
+    }
     const block = BLOCK_TAG.test(node.tagName);
     if (block && !endsWithBreak()) parts.push("\n");
+    if (node.tagName === "LI" && node.parentElement?.matches("ul.checklist")) {
+      parts.push(node.getAttribute("data-checked") === "true" ? "[x] " : "[ ] ");
+    }
     node.childNodes.forEach(walk);
     if (block && !endsWithBreak()) parts.push("\n");
   };
@@ -132,12 +183,13 @@ const drawingSvg = (block: DrawingBlock, document: InktileDocument): string => {
 const blockHtml = (block: Block, document: InktileDocument, assets: RuntimeAssetMap): string => {
   switch (block.type) {
     case "text":
-      return `<div class="text">${block.html}</div>`;
+      // Stored math fields hold only TeX; the print frame gets static KaTeX markup baked in.
+      return `<div class="text">${renderMathInHtml(block.html)}</div>`;
     case "variants": {
       const active = block.variants[block.activeVariant] ?? block.variants[0];
       if (!active) return "";
       const label = block.variants.length > 1 && active.label ? `<p class="eyebrow">${escapeHtml(active.label)}</p>` : "";
-      return `<div class="text">${label}${active.html}</div>`;
+      return `<div class="text">${label}${renderMathInHtml(active.html)}</div>`;
     }
     case "image": {
       const asset = assets[block.assetId];
@@ -166,6 +218,30 @@ const pageHtml = (page: InktilePage, document: InktileDocument, assets: RuntimeA
   return `<section class="tile">${front}${notes}</section>`;
 };
 
+/**
+ * The print iframe is a fresh same-origin document, so it does NOT inherit the app's bundled
+ * @font-face rules — without this, any tile using a bundled font (Lora, Fraunces, …) would
+ * silently fall back to a system font in the exported PDF. Copy every @font-face rule out of the
+ * app's own stylesheets, absolutizing each url() against its sheet's location so the font files
+ * still resolve from inside the iframe (whose base URL differs from the stylesheet's).
+ */
+const collectFontFaceCss = (): string => {
+  const faces: string[] = [];
+  for (const sheet of Array.from(window.document.styleSheets)) {
+    let rules: CSSRuleList | null = null;
+    try { rules = sheet.cssRules; } catch { continue; } // cross-origin sheet: not readable, skip
+    if (!rules) continue;
+    const base = sheet.href ?? window.document.baseURI;
+    for (const rule of Array.from(rules)) {
+      if (!(rule instanceof CSSFontFaceRule)) continue;
+      faces.push(rule.cssText.replace(/url\((['"]?)([^'")]+)\1\)/g, (whole, _quote, ref) => {
+        try { return `url("${new URL(ref, base).href}")`; } catch { return whole; }
+      }));
+    }
+  }
+  return faces.join("\n");
+};
+
 // The <title> still carries the document title so the print dialog suggests it as the
 // PDF filename, but the rendered pages hold nothing except the tiles themselves:
 // borderless, full width, separated only by vertical space.
@@ -173,9 +249,11 @@ const buildPrintHtml = (document: InktileDocument, assets: RuntimeAssetMap): str
   const title = escapeHtml(document.title.trim() || "Untitled Inktile");
   const tiles = pagesInOrder(document).map((page) => pageHtml(page, document, assets)).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>
+    ${collectFontFaceCss()}
+    ${tiles.includes("katex") ? collectKatexCss() : ""}
     @page { margin: 10mm; }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 13px; line-height: 1.55; color: #1f1e1b; }
+    body { margin: 0; font-family: Inter, Arial, Helvetica, sans-serif; font-size: 13px; line-height: 1.55; color: #1f1e1b; }
     .tile { margin: 0 0 16px; break-inside: avoid; page-break-inside: avoid; }
     .tile:last-child { margin-bottom: 0; }
     .tile img, .tile .drawing { display: block; width: 100%; height: auto; }
@@ -185,6 +263,17 @@ const buildPrintHtml = (document: InktileDocument, assets: RuntimeAssetMap): str
     .placeholder { margin: 0; color: #8a857c; font-style: italic; }
     .notes { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #d8d4cc; }
     hr { border: none; border-top: 1px solid #d8d4cc; }
+    a { color: #2f80cf; text-decoration: underline; }
+    table.text-table { border-collapse: collapse; width: 100%; margin: 6px 0; table-layout: fixed; }
+    .text-table th, .text-table td { border: 1px solid #d8d4cc; padding: 4px 8px; vertical-align: top; text-align: left; word-break: break-word; }
+    .text-table th { background: #f4f2ee; font-weight: 600; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    ul.checklist { list-style: none; padding-left: 4px; }
+    ul.checklist > li { position: relative; padding-left: 24px; }
+    ul.checklist > li::before { content: ""; position: absolute; left: 1px; top: .3em; width: 13px; height: 13px; border: 1.5px solid #b5b1a9; border-radius: 4px; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    ul.checklist > li[data-checked="true"]::before { background: #6d7770; border-color: #6d7770; }
+    ul.checklist > li[data-checked="true"]::after { content: ""; position: absolute; left: 4.5px; top: calc(.3em + 3px); width: 7px; height: 4px; border-left: 1.7px solid #fff; border-bottom: 1.7px solid #fff; transform: rotate(-45deg); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    ul.checklist > li[data-checked="true"] { color: #8a857c; text-decoration: line-through; }
+    .math-field[data-display="true"] { display: block; text-align: center; margin: 8px 0; }
   </style></head><body>${tiles}</body></html>`;
 };
 

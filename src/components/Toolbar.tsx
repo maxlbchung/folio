@@ -1,16 +1,25 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useDocument } from "../document/DocumentContext";
+import { useTileSelection } from "./TileSelectionContext";
+import type { PageSide, TextBlock, VariantGroupBlock, VerticalAlignment } from "../document/types";
 import { saveDocumentFile } from "../persistence/fileSystem";
 import { exportDocumentAsPdf, exportDocumentAsText } from "../persistence/exportDocument";
 import { writeAutosave } from "../persistence/autosave";
 import { saveLibraryInktile } from "../persistence/library";
 import { ExportDialog, type ExportFormat } from "./ExportDialog";
-import { ZWSP } from "../utils/editorHtml";
+import { stripCaretArtifacts, ZWSP } from "../utils/editorHtml";
+import {
+  decorateChecklistAtSelection, undecorateChecklistAtSelection, selectionInChecklist,
+  tableHtml, FRESH_TABLE_ATTR, placeCaretIn,
+  normalizeLinkUrl, selectionLink, unwrapElement
+} from "../utils/richText";
+import { mathFieldHtml, FRESH_MATH_ATTR, renderMathIn } from "../utils/mathField";
+import { openMathEditor } from "./MathEditor";
 import {
   AlignBottomIcon, AlignCenterIcon, AlignLeftIcon, AlignMiddleIcon, AlignRightIcon, AlignTopIcon,
-  BulletListIcon, ExportIcon, HighlighterIcon,
-  HomeIcon, NumberedListIcon, RedoIcon, RemoveFormatIcon, SaveIcon, UndoIcon,
+  BulletListIcon, ChecklistIcon, DividerIcon, ExportIcon, HighlighterIcon,
+  HomeIcon, LinkIcon, MathIcon, MoreIcon, NumberedListIcon, RedoIcon, RemoveFormatIcon, SaveIcon, TableIcon, UndoIcon,
   ZoomInIcon, ZoomOutIcon
 } from "./icons";
 
@@ -24,13 +33,31 @@ interface ToolbarProps {
 
 // Single source of truth for the two dropdowns: used both to render the options and to
 // map the browser's queryCommand* readings back onto a known option when the selection moves.
-const FONT_FAMILIES = [
-  { value: "Arial", label: "Arial" },
-  { value: "Georgia", label: "Georgia" },
-  { value: "Times New Roman", label: "Times New Roman" },
-  { value: "Trebuchet MS", label: "Trebuchet" },
-  { value: "Courier New", label: "Courier" }
+// Bundled document fonts — self-hosted OFL variable faces (see the @font-face rules in
+// src/styles/app.css) so a tile renders identically on every machine. Grouped for the picker's
+// <optgroup>s; `value` is the CSS family name and MUST match the @font-face family names.
+// DEFAULT_FONT is also the editable area's CSS default (.text-block / .variant-editor) and the
+// print stylesheet in exportDocument.ts — keep those three in sync.
+const FONT_GROUPS: { label: string; fonts: { value: string; label: string }[] }[] = [
+  { label: "Sans", fonts: [
+    { value: "Inter", label: "Inter" },
+    { value: "Work Sans", label: "Work Sans" }
+  ] },
+  { label: "Serif", fonts: [
+    { value: "Lora", label: "Lora" },
+    { value: "Source Serif 4", label: "Source Serif" }
+  ] },
+  { label: "Display", fonts: [
+    { value: "Fraunces", label: "Fraunces" },
+    { value: "Playfair Display", label: "Playfair" },
+    { value: "Space Grotesk", label: "Space Grotesk" }
+  ] },
+  { label: "Mono", fonts: [
+    { value: "JetBrains Mono", label: "JetBrains Mono" }
+  ] }
 ];
+const FONT_FAMILIES = FONT_GROUPS.flatMap((group) => group.fonts);
+const DEFAULT_FONT = "Inter";
 // value = the legacy execCommand("fontSize") bucket (1-7) the label maps to.
 const FONT_SIZES = [
   { value: "3", label: "Normal" },
@@ -133,6 +160,25 @@ const ensureDarkColorStyles = () => {
   doc.head.appendChild(style);
 };
 
+/**
+ * Commands that toggle a state on the selection. A multi-tile apply reads each tile's
+ * current state and drives every tile to one shared target — mixed or off everywhere →
+ * set everywhere, already on everywhere → clear everywhere — instead of letting
+ * execCommand toggle each tile independently into an inconsistent mix.
+ */
+const TOGGLE_COMMANDS = new Set([
+  "bold", "italic", "underline", "strikeThrough", "subscript", "superscript",
+  "insertUnorderedList", "insertOrderedList"
+]);
+
+/** One editable a multi-tile formatting command applies to, with its owning block. */
+interface TileFormatTarget {
+  pageId: string;
+  side: PageSide;
+  block: TextBlock | VariantGroupBlock;
+  editable: HTMLElement;
+}
+
 interface FormatState {
   fontName: string;
   fontSize: string;
@@ -148,13 +194,15 @@ interface FormatState {
   hiliteColor: string;
   unorderedList: boolean;
   orderedList: boolean;
+  checklist: boolean;
+  link: boolean;
   align: "left" | "center" | "right";
 }
 
 const DEFAULT_FORMAT: FormatState = {
-  fontName: "Arial", fontSize: "3", bold: false, italic: false, underline: false, strikeThrough: false,
+  fontName: DEFAULT_FONT, fontSize: "3", bold: false, italic: false, underline: false, strikeThrough: false,
   subscript: false, superscript: false, foreColor: "", hiliteColor: "", unorderedList: false, orderedList: false,
-  align: "left"
+  checklist: false, link: false, align: "left"
 };
 
 // queryCommandValue returns computed colors ("rgb(29, 29, 27)"); reduce to lowercase hex so
@@ -171,11 +219,12 @@ const cssColorToHex = (raw: string): string => {
 };
 
 // queryCommandValue("fontName") returns the resolved font-family, which may be quoted and/or a
-// full fallback stack ("Arial, Helvetica, sans-serif"). Reduce it to a known option, defaulting
-// to Arial when the selection uses a font outside the dropdown (matches the Arial default rule).
+// full fallback stack ("Inter, ui-sans-serif, sans-serif"). Reduce it to a known option,
+// defaulting to DEFAULT_FONT when the selection uses a font outside the picker (e.g. a legacy
+// tile authored in a since-removed web-safe font, or the editable area's own default).
 const normalizeFontName = (raw: string): string => {
   const first = (raw || "").split(",")[0].trim().replace(/^["']|["']$/g, "");
-  return FONT_FAMILIES.find((font) => font.value.toLowerCase() === first.toLowerCase())?.value ?? "Arial";
+  return FONT_FAMILIES.find((font) => font.value.toLowerCase() === first.toLowerCase())?.value ?? DEFAULT_FONT;
 };
 
 interface ColorMenuProps {
@@ -261,17 +310,198 @@ function ColorMenu({ anchor, colors, columns, activeColor, defaultLabel, onPick,
   );
 }
 
+type MoreMenuAction =
+  | "bullets" | "numbers" | "checklist"
+  | "link" | "table" | "math" | "divider"
+  | "anchor-top" | "anchor-center" | "anchor-bottom"
+  | "clear";
+
+interface MoreMenuProps {
+  anchor: DOMRect;
+  format: FormatState;
+  /** Vertical anchoring of the targeted tiles: the value they all share (null when mixed)
+   * and whether any tile is targeted at all. */
+  anchorState: { enabled: boolean; active: VerticalAlignment | null };
+  onAction: (action: MoreMenuAction) => void;
+  onClose: () => void;
+}
+
+/**
+ * Dropdown collecting the less-frequent formatting controls: lists, link/table/math
+ * insertion, vertical text anchoring, and clear formatting — one horizontal row of icon
+ * buttons whose top-right corner hangs off the More button's bottom-right. Portaled to
+ * <body> like ColorMenu, and mousedown default is prevented throughout so the editable
+ * keeps its focus and selection while picking — the commands behind these items restore
+ * the remembered caret themselves.
+ */
+function MoreFormattingMenu({ anchor, format, anchorState, onAction, onClose }: MoreMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: anchor.left, top: anchor.bottom + 6 });
+
+  // Right-align to the button once measured (top-right corner at the button's
+  // bottom-right), clamped so the row never spills off-screen. The popup portals
+  // outside the zoomed app shell, so it carries the UI scale itself (its buttons match
+  // the header's); its fixed coordinates then resolve in that zoomed space, so
+  // visual-viewport targets divide by the scale.
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!menu) return;
+    const scale = parseFloat(getComputedStyle(window.document.documentElement).getPropertyValue("--ui-scale")) || 1;
+    const width = menu.offsetWidth * scale;
+    const left = Math.max(8, Math.min(anchor.right - width, window.innerWidth - width - 8));
+    setPosition({ left: left / scale, top: (anchor.bottom + 6) / scale });
+  }, [anchor.right, anchor.bottom]);
+
+  useEffect(() => {
+    const handlePointer = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      // The More button toggles the menu itself in onClick; closing here too would make
+      // that click immediately reopen it.
+      if (menuRef.current?.contains(target as Node) || target?.closest(".format-button--more")) return;
+      onClose();
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("mousedown", handlePointer, true);
+    window.addEventListener("keydown", handleKey);
+    window.addEventListener("resize", onClose);
+    window.addEventListener("scroll", onClose, true);
+    return () => {
+      window.removeEventListener("mousedown", handlePointer, true);
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("resize", onClose);
+      window.removeEventListener("scroll", onClose, true);
+    };
+  }, [onClose]);
+
+  const item = (action: MoreMenuAction, label: string, icon: ReactNode, active = false, disabled = false) => (
+    <button
+      className={`format-button ${active ? "is-active" : ""}`.trim()}
+      role="menuitem"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onAction(action)}
+    >{icon}</button>
+  );
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      className="format-menu"
+      role="menu"
+      aria-label="More formatting"
+      style={{ left: position.left, top: position.top }}
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      {item("bullets", "Bulleted list", <BulletListIcon size={15} />, format.unorderedList)}
+      {item("numbers", "Numbered list", <NumberedListIcon size={15} />, format.orderedList)}
+      {item("checklist", "Checklist", <ChecklistIcon size={15} />, format.checklist)}
+      <span className="format-menu__divider" role="separator" />
+      {item("link", "Link (Ctrl+K)", <LinkIcon size={15} />, format.link)}
+      {item("table", "Insert table", <TableIcon size={15} />)}
+      {item("math", "Insert math (LaTeX)", <MathIcon size={15} />)}
+      {item("divider", "Insert divider line", <DividerIcon size={15} />)}
+      <span className="format-menu__divider" role="separator" />
+      {item("anchor-top", "Anchor text to top", <AlignTopIcon size={15} />, anchorState.active === "top", !anchorState.enabled)}
+      {item("anchor-center", "Anchor text to middle", <AlignMiddleIcon size={15} />, anchorState.active === "center", !anchorState.enabled)}
+      {item("anchor-bottom", "Anchor text to bottom", <AlignBottomIcon size={15} />, anchorState.active === "bottom", !anchorState.enabled)}
+      <span className="format-menu__divider" role="separator" />
+      {item("clear", "Clear formatting", <RemoveFormatIcon size={15} />)}
+    </div>,
+    window.document.body
+  );
+}
+
+interface LinkMenuProps {
+  anchor: DOMRect;
+  initialHref: string;
+  /** Whether the caret sits in an existing link (enables Remove for a collapsed caret). */
+  inLink: boolean;
+  onApply: (url: string) => void;
+  onRemove: () => void;
+  onClose: () => void;
+}
+
+/** URL popover for creating and editing links. Unlike the other popovers its input needs
+ * focus, so mousedown is NOT prevented — the pending selection was already remembered and
+ * the apply/remove commands restore it. */
+function LinkMenu({ anchor, initialHref, inLink, onApply, onRemove, onClose }: LinkMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [value, setValue] = useState(initialHref);
+  const [left, setLeft] = useState(anchor.left);
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!menu) return;
+    setLeft(Math.max(8, Math.min(anchor.left, window.innerWidth - menu.offsetWidth - 8)));
+  }, [anchor.left]);
+
+  // Focus without scrolling: a plain autoFocus can emit a scroll event, and any dismiss
+  // listener bound to scroll would close the menu the instant it opens.
+  useEffect(() => {
+    inputRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  // No scroll-dismiss here (unlike the icon popovers): this menu holds a text input, and
+  // an incidental scroll must not eat what the user is typing. Outside clicks and Escape
+  // still close it.
+  useEffect(() => {
+    const handlePointer = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) onClose();
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("mousedown", handlePointer, true);
+    window.addEventListener("keydown", handleKey);
+    window.addEventListener("resize", onClose);
+    return () => {
+      window.removeEventListener("mousedown", handlePointer, true);
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("resize", onClose);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div ref={menuRef} className="link-menu" role="dialog" aria-label="Edit link" style={{ left, top: anchor.bottom + 6 }}>
+      <input
+        ref={inputRef}
+        type="text"
+        aria-label="Link URL"
+        placeholder="https://…"
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            onApply(value);
+          }
+        }}
+      />
+      <button className="link-menu__remove" disabled={!inLink} onClick={onRemove}>Remove</button>
+      <button className="link-menu__apply" onClick={() => onApply(value)}>Apply</button>
+    </div>,
+    window.document.body
+  );
+}
+
 export function Toolbar({ onStatus, onHome, onNewDocument, onOpenDocument, onSave }: ToolbarProps) {
   const {
     document, assets, dirty, currentPath, setCurrentPath, markSaved,
-    updateTitle, setPageVerticalAlign, undo, redo, canUndo, canRedo
+    updateTitle, setPagesVerticalAlign, updateBlock, checkpoint, undo, redo, canUndo, canRedo
   } = useDocument();
+  const { selectedIds } = useTileSelection();
   const [busy, setBusy] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [format, setFormat] = useState<FormatState>(DEFAULT_FORMAT);
   const [colorMenu, setColorMenu] = useState<{ kind: "fore" | "hilite"; anchor: DOMRect } | null>(null);
+  const [moreMenu, setMoreMenu] = useState<DOMRect | null>(null);
+  const [linkMenu, setLinkMenu] = useState<{ anchor: DOMRect; href: string; inLink: boolean } | null>(null);
   const editableRef = useRef<HTMLElement | null>(null);
   const selectionRef = useRef<Range | null>(null);
   // "Stored marks" for a collapsed caret, ProseMirror-style: toggling a style with no text
@@ -329,8 +559,12 @@ export function Toolbar({ onStatus, onHome, onNewDocument, onOpenDocument, onSav
       // backColor reads the effective (inherited) background, so plain text reports the page
       // color rather than "" — harmless, since it only drives the active-swatch highlight.
       hiliteColor: marks?.hiliteColor ?? canonicalColor(cssColorToHex(doc.queryCommandValue("backColor")), HIGHLIGHT_COLORS),
-      unorderedList: doc.queryCommandState("insertUnorderedList"),
+      // A checklist is a decorated ul, so the browser reports it as an unordered list;
+      // the two toolbar buttons split that reading between them.
+      unorderedList: doc.queryCommandState("insertUnorderedList") && !selectionInChecklist(),
       orderedList: doc.queryCommandState("insertOrderedList"),
+      checklist: selectionInChecklist(),
+      link: Boolean(editableRef.current && selectionLink(editableRef.current)),
       align: doc.queryCommandState("justifyCenter") ? "center" : doc.queryCommandState("justifyRight") ? "right" : "left"
     };
     // Keep the same object when nothing changed so frequent selectionchange events during
@@ -354,9 +588,99 @@ export function Toolbar({ onStatus, onHome, onNewDocument, onOpenDocument, onSav
     syncFormatState();
   };
 
+  /** Every editable a multi-tile command targets: each selected tile's ACTIVE side (the
+   * page front, or the notes back when flipped), skipping empty blocks so they cannot
+   * water down a toggle's "already applied everywhere?" reading. */
+  const collectTileTargets = (): TileFormatTarget[] => {
+    const doc = window.document;
+    const targets: TileFormatTarget[] = [];
+    for (const pageId of selectedIds) {
+      const page = document.pages[pageId];
+      if (!page) continue;
+      const side: PageSide = page.activeSide === "back" ? "back" : "front";
+      const face = side === "back" ? page.back : page.front;
+      const faceElement = doc.querySelector(`[data-page-id="${pageId}"] .page-face--${side}`);
+      if (!face || !faceElement) continue;
+      // Block-shell elements render in face.blocks order, which maps each editable back
+      // to the block it must commit into.
+      const shells = Array.from(faceElement.querySelectorAll<HTMLElement>(".page-blocks > .block-shell"));
+      face.blocks.forEach((block, index) => {
+        if (block.type !== "text" && block.type !== "variants") return;
+        const editable = shells[index]?.querySelector<HTMLElement>(block.type === "text" ? ".text-block" : ".variant-editor");
+        if (editable && (editable.textContent ?? "").split(ZWSP).join("").length > 0) {
+          targets.push({ pageId, side, block, editable });
+        }
+      });
+    }
+    return targets;
+  };
+
+  /** Persist one target's post-execCommand DOM back into its block (no history record —
+   * the caller checkpoints once for the whole multi-tile operation). */
+  const commitTileTarget = (target: TileFormatTarget) => {
+    const html = stripCaretArtifacts(target.editable.innerHTML);
+    if (target.block.type === "text") {
+      if (html !== target.block.html) updateBlock(target.pageId, target.side, target.block.id, { html }, false);
+      return;
+    }
+    const block = target.block;
+    if (html === block.variants[block.activeVariant]?.html) return;
+    const variants = block.variants.map((variant, index) =>
+      index === block.activeVariant ? { ...variant, html } : variant);
+    updateBlock(target.pageId, target.side, block.id, { variants }, false);
+  };
+
+  /** Apply a formatting command to every selected tile's text as ONE undo step, by
+   * selecting each tile's whole content and running the same execCommand pipeline the
+   * caret path uses. */
+  const applyCommandToTiles = (command: string, value?: string) => {
+    const doc = window.document;
+    const selection = window.getSelection();
+    if (!selection) return;
+    const targets = collectTileTargets();
+    const selectContents = (editable: HTMLElement) => {
+      const range = doc.createRange();
+      range.selectNodeContents(editable);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    };
+    let apply = targets;
+    if (TOGGLE_COMMANDS.has(command)) {
+      const states = targets.map((target) => {
+        selectContents(target.editable);
+        return doc.queryCommandState(command);
+      });
+      const enable = !states.every(Boolean);
+      apply = targets.filter((_, index) => states[index] !== enable);
+    }
+    // The checkpoint must precede the commits but only exist when something changes, so
+    // undo never has an empty step: document state is untouched by execCommand itself
+    // (only the live DOM changes), letting the snapshot wait until after the loop.
+    let recorded = false;
+    for (const target of apply) {
+      target.editable.focus({ preventScroll: true });
+      selectContents(target.editable);
+      doc.execCommand("styleWithCSS", false, "true");
+      doc.execCommand(command, false, value);
+      if (!recorded && stripCaretArtifacts(target.editable.innerHTML) !== (target.block.type === "text" ? target.block.html : target.block.variants[target.block.activeVariant]?.html)) {
+        checkpoint();
+        recorded = true;
+      }
+      commitTileTarget(target);
+    }
+    selection.removeAllRanges();
+    if (doc.activeElement instanceof HTMLElement) doc.activeElement.blur();
+  };
+
   // `marks` is the resulting toolbar state for this command; when the caret is collapsed it is
   // remembered as a pending typing style so the controls update at once (see storedMarksRef).
   const applyTextCommand = (command: string, value?: string, marks?: Partial<FormatState>) => {
+    // A live tile multi-selection outranks any remembered caret: the command applies to
+    // the whole text of every selected tile instead.
+    if (selectedIds.length) {
+      applyCommandToTiles(command, value);
+      return;
+    }
     const editable = editableRef.current;
     const range = selectionRef.current;
     if (!editable || !range) return;
@@ -377,6 +701,12 @@ export function Toolbar({ onStatus, onHome, onNewDocument, onOpenDocument, onSav
   // element immediately, anchored by a zero-width space the tile views strip from stored
   // HTML (see stripCaretArtifacts). With a real selection this defers to applyTextCommand.
   const applyScriptCommand = (kind: "subscript" | "superscript") => {
+    // Multi-tile selections always format whole-tile content (never a collapsed caret),
+    // so the caret-anchor trick below is not needed there.
+    if (selectedIds.length) {
+      applyCommandToTiles(kind);
+      return;
+    }
     const editable = editableRef.current;
     const range = selectionRef.current;
     if (!editable || !range) return;
@@ -462,6 +792,146 @@ export function Toolbar({ onStatus, onHome, onNewDocument, onOpenDocument, onSav
     captureTextSelection();
   };
 
+  /** Focus the remembered editable and restore its remembered selection — the setup every
+   * custom (non-execCommand-string) command shares. Null when there is no usable caret. */
+  const focusSavedSelection = (): HTMLElement | null => {
+    const editable = editableRef.current;
+    const range = selectionRef.current;
+    if (!editable || !range) return null;
+    editable.focus();
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return editable;
+  };
+
+  // Checklists piggyback on the browser's list handling: ensure a ul exists, then decorate
+  // it (class + per-item data-checked). Toggling off dissolves the list like the other
+  // list buttons. Acts on the caret's list only — a tile multi-selection is ignored.
+  const applyChecklistCommand = () => {
+    if (selectedIds.length) return;
+    const editable = focusSavedSelection();
+    if (!editable) return;
+    const doc = window.document;
+    if (format.checklist) {
+      doc.execCommand("insertUnorderedList");
+    } else {
+      doc.execCommand("styleWithCSS", false, "true");
+      // Wraps plain lines, or converts an ordered list; an existing plain ul just decorates.
+      if (!doc.queryCommandState("insertUnorderedList")) doc.execCommand("insertUnorderedList");
+      decorateChecklistAtSelection(editable);
+    }
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+    captureTextSelection();
+  };
+
+  // Inside a checklist the bullet button converts (drops the checkboxes, keeps the list)
+  // instead of letting execCommand dissolve the ul it doesn't know is special.
+  const applyBulletListCommand = () => {
+    if (!selectedIds.length && format.checklist) {
+      const editable = focusSavedSelection();
+      if (!editable) return;
+      undecorateChecklistAtSelection(editable);
+      editable.dispatchEvent(new Event("input", { bubbles: true }));
+      captureTextSelection();
+      return;
+    }
+    applyTextCommand("insertUnorderedList");
+  };
+
+  const insertTableCommand = () => {
+    if (selectedIds.length) return;
+    const editable = focusSavedSelection();
+    if (!editable) return;
+    window.document.execCommand("insertHTML", false, tableHtml());
+    const fresh = editable.querySelector<HTMLElement>(`[${FRESH_TABLE_ATTR}]`);
+    if (fresh) {
+      fresh.removeAttribute(FRESH_TABLE_ATTR);
+      const cell = fresh.querySelector<HTMLElement>("th, td");
+      if (cell) placeCaretIn(cell);
+    }
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+    captureTextSelection();
+  };
+
+  /** Open the link popover for the remembered selection, prefilled from the link at the
+   * caret when there is one. Anchored to the selection so it opens where the user works. */
+  const openLinkEditor = () => {
+    const editable = editableRef.current;
+    const range = selectionRef.current;
+    if (!editable || !range) return;
+    const startElement = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+    const existing = startElement?.closest("a");
+    const rangeRect = range.getBoundingClientRect();
+    const anchorRect = rangeRect.width || rangeRect.height
+      ? rangeRect
+      : existing?.getBoundingClientRect() ?? editable.getBoundingClientRect();
+    setLinkMenu({
+      anchor: anchorRect,
+      href: existing?.getAttribute("href") ?? "",
+      inLink: Boolean(existing) || !range.collapsed
+    });
+  };
+
+  const applyLinkFromMenu = (raw: string) => {
+    const url = normalizeLinkUrl(raw);
+    if (!url) {
+      onStatus("Enter a valid link (http, https, or mailto)");
+      return;
+    }
+    setLinkMenu(null);
+    const editable = focusSavedSelection();
+    if (!editable) return;
+    checkpoint();
+    const selection = window.getSelection();
+    const existing = selectionLink(editable);
+    if (selection?.isCollapsed && existing) {
+      // Caret inside a link: retarget it without touching its text.
+      existing.setAttribute("href", url);
+    } else if (selection?.isCollapsed) {
+      // No selection to wrap: insert the URL itself as a link.
+      const escaped = url.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+      window.document.execCommand("insertHTML", false, `<a href="${escaped}">${escaped}</a>`);
+    } else {
+      window.document.execCommand("createLink", false, url);
+    }
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+    captureTextSelection();
+  };
+
+  const removeLinkFromMenu = () => {
+    setLinkMenu(null);
+    const editable = focusSavedSelection();
+    if (!editable) return;
+    checkpoint();
+    const selection = window.getSelection();
+    const existing = selectionLink(editable);
+    if (selection?.isCollapsed && existing) unwrapElement(existing);
+    else window.document.execCommand("unlink");
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+    captureTextSelection();
+  };
+
+  // Insert an empty math field at the caret and hand it straight to the math editor.
+  const insertMathCommand = () => {
+    if (selectedIds.length) return;
+    const editable = focusSavedSelection();
+    if (!editable) return;
+    window.document.execCommand("insertHTML", false, mathFieldHtml());
+    const fresh = editable.querySelector<HTMLElement>(`[${FRESH_MATH_ATTR}]`);
+    if (fresh) {
+      fresh.removeAttribute(FRESH_MATH_ATTR);
+      // Drop the anchor character that carried the span through insertHTML: with the live
+      // DOM matching stored HTML exactly, the blur-time anchor scrub never rewrites the
+      // tile, so the element handed to the math editor stays attached.
+      fresh.textContent = "";
+    }
+    renderMathIn(editable);
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+    captureTextSelection();
+    if (fresh) openMathEditor(fresh);
+  };
+
   const scriptButtonProps = (kind: "subscript" | "superscript", active: boolean) => ({
     onMouseDown: (event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault(),
     onClick: () => applyScriptCommand(kind),
@@ -493,14 +963,30 @@ export function Toolbar({ onStatus, onHome, onNewDocument, onOpenDocument, onSav
     className: `format-button ${extraClass} ${active ? "is-active" : ""}`.replace(/\s+/g, " ").trim()
   });
 
-  const verticalAlignButtonProps = (alignment: "top" | "center" | "bottom") => ({
-    onMouseDown: (event: React.MouseEvent<HTMLButtonElement>) => event.preventDefault(),
-    onClick: () => {
-      if (selectedPageId) setPageVerticalAlign(selectedPageId, alignment);
-    },
-    disabled: !selectedPageId,
-    className: `format-button ${selectedPageId && document.pages[selectedPageId]?.verticalAlign === alignment ? "is-active" : ""}`
-  });
+  // Vertical anchoring targets for the dropdown: a tile multi-selection anchors every
+  // selected tile; otherwise the tile owning the text caret. The menu shows an item as
+  // active only when ALL targeted tiles already share that anchor.
+  const anchorTargetIds = selectedIds.length ? selectedIds : selectedPageId ? [selectedPageId] : [];
+  const anchorState = {
+    enabled: anchorTargetIds.length > 0,
+    active: anchorTargetIds.length && anchorTargetIds.every((id) => document.pages[id]?.verticalAlign === document.pages[anchorTargetIds[0]]?.verticalAlign)
+      ? document.pages[anchorTargetIds[0]]?.verticalAlign ?? null
+      : null
+  };
+
+  const runMoreAction = (action: MoreMenuAction) => {
+    setMoreMenu(null);
+    if (action === "bullets") applyBulletListCommand();
+    else if (action === "numbers") applyTextCommand("insertOrderedList");
+    else if (action === "checklist") applyChecklistCommand();
+    else if (action === "link") openLinkEditor();
+    else if (action === "table") insertTableCommand();
+    else if (action === "math") insertMathCommand();
+    // The full-width horizontal rule — the same <hr> the "---" autoformat produces.
+    else if (action === "divider") applyTextCommand("insertHorizontalRule");
+    else if (action === "clear") applyTextCommand("removeFormat", undefined, { fontName: DEFAULT_FONT, fontSize: "3", bold: false, italic: false, underline: false, strikeThrough: false, subscript: false, superscript: false, foreColor: "", hiliteColor: "" });
+    else if (anchorTargetIds.length) setPagesVerticalAlign(anchorTargetIds, action === "anchor-top" ? "top" : action === "anchor-center" ? "center" : "bottom");
+  };
 
   useEffect(ensureDarkColorStyles, []);
 
@@ -591,12 +1077,15 @@ export function Toolbar({ onStatus, onHome, onNewDocument, onOpenDocument, onSav
       } else if (event.key.toLowerCase() === "n") {
         event.preventDefault();
         onNewDocument();
-      } else if (event.key.toLowerCase() === "z" && !event.shiftKey) {
+      } else if (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y") {
+        // Single-line inputs and textareas (document title, the math editor's TeX source)
+        // keep the browser's native text undo; structural undo owns everything else,
+        // including the rich-text tiles.
+        const active = window.document.activeElement;
+        if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
         event.preventDefault();
-        undo();
-      } else if ((event.key.toLowerCase() === "z" && event.shiftKey) || event.key.toLowerCase() === "y") {
-        event.preventDefault();
-        redo();
+        if (event.key.toLowerCase() === "z" && !event.shiftKey) undo();
+        else redo();
       } else if (!event.shiftKey && (event.key.toLowerCase() === "b" || event.key.toLowerCase() === "i" || event.key.toLowerCase() === "u")) {
         // Bold/italic/underline shortcuts must run through the same path as the toolbar buttons
         // rather than the browser's native contentEditable handler -- otherwise the pending
@@ -604,13 +1093,23 @@ export function Toolbar({ onStatus, onHome, onNewDocument, onOpenDocument, onSav
         // highlight lags until the next keystroke (see storedMarksRef / applyTextCommand).
         const active = window.document.activeElement;
         const editable = active instanceof HTMLElement ? active.closest<HTMLElement>(".text-block, .variant-editor") : null;
-        if (!editable) return;
+        // With a tile multi-selection the shortcut formats the selected tiles (the
+        // applyTextCommand calls below branch there); otherwise it needs a text caret.
+        if (!editable && !selectedIds.length) return;
         event.preventDefault();
-        captureTextSelection();
+        if (!selectedIds.length) captureTextSelection();
         const key = event.key.toLowerCase();
         if (key === "b") applyTextCommand("bold", undefined, { bold: !format.bold });
         else if (key === "i") applyTextCommand("italic", undefined, { italic: !format.italic });
         else applyTextCommand("underline", undefined, { underline: !format.underline });
+      } else if (!event.shiftKey && event.key.toLowerCase() === "k") {
+        // Ctrl+K opens the link editor for the caret or selection in a text tile.
+        const active = window.document.activeElement;
+        const editable = active instanceof HTMLElement ? active.closest<HTMLElement>(".text-block, .variant-editor") : null;
+        if (!editable) return;
+        event.preventDefault();
+        captureTextSelection();
+        openLinkEditor();
       } else if (event.key === "=" || event.key === "+") {
         event.preventDefault();
         changeZoom(.1);
@@ -680,7 +1179,11 @@ export function Toolbar({ onStatus, onHome, onNewDocument, onOpenDocument, onSav
 
       <div className="text-toolbar" aria-label="Text formatting">
         <select aria-label="Font family" value={format.fontName} onPointerDown={captureTextSelection} onChange={(event) => applyTextCommand("fontName", event.target.value, { fontName: normalizeFontName(event.target.value) })}>
-          {FONT_FAMILIES.map((font) => <option key={font.value} value={font.value}>{font.label}</option>)}
+          {FONT_GROUPS.map((group) => (
+            <optgroup key={group.label} label={group.label}>
+              {group.fonts.map((font) => <option key={font.value} value={font.value} style={{ fontFamily: font.value }}>{font.label}</option>)}
+            </optgroup>
+          ))}
         </select>
         <select aria-label="Font size" value={format.fontSize} onPointerDown={captureTextSelection} onChange={(event) => applyTextCommand("fontSize", event.target.value, { fontSize: event.target.value })}>
           {FONT_SIZES.map((size) => <option key={size.value} value={size.value}>{size.label}</option>)}
@@ -714,17 +1217,19 @@ export function Toolbar({ onStatus, onHome, onNewDocument, onOpenDocument, onSav
           <span className="swatch-bar swatch-bar--outlined" style={{ background: HIGHLIGHT_COLORS.some((swatch) => swatch.light === format.hiliteColor) ? displayColor(format.hiliteColor, HIGHLIGHT_COLORS) : "transparent" }} />
         </button>
         <span className="text-toolbar__divider" />
-        <button title="Bulleted list" aria-label="Bulleted list" {...formatButtonProps("insertUnorderedList", format.unorderedList)}><BulletListIcon size={15}/></button>
-        <button title="Numbered list" aria-label="Numbered list" {...formatButtonProps("insertOrderedList", format.orderedList)}><NumberedListIcon size={15}/></button>
-        <span className="text-toolbar__divider" />
         <button title="Align left" aria-label="Align left" {...formatButtonProps("justifyLeft", format.align === "left")}><AlignLeftIcon size={15}/></button>
         <button title="Align center" aria-label="Align center" {...formatButtonProps("justifyCenter", format.align === "center")}><AlignCenterIcon size={15}/></button>
         <button title="Align right" aria-label="Align right" {...formatButtonProps("justifyRight", format.align === "right")}><AlignRightIcon size={15}/></button>
         <span className="text-toolbar__divider" />
-        <button title="Anchor text to top" aria-label="Anchor text to top" {...verticalAlignButtonProps("top")}><AlignTopIcon size={15}/></button>
-        <button title="Anchor text to middle" aria-label="Anchor text to middle" {...verticalAlignButtonProps("center")}><AlignMiddleIcon size={15}/></button>
-        <button title="Anchor text to bottom" aria-label="Anchor text to bottom" {...verticalAlignButtonProps("bottom")}><AlignBottomIcon size={15}/></button>
-        <button title="Clear formatting" aria-label="Clear formatting" {...formatButtonProps("removeFormat", false, "", { fontName: "Arial", fontSize: "3", bold: false, italic: false, underline: false, strikeThrough: false, subscript: false, superscript: false, foreColor: "", hiliteColor: "" })}><RemoveFormatIcon size={15}/></button>
+        <button
+          title="More formatting" aria-label="More formatting" aria-haspopup="menu" aria-expanded={Boolean(moreMenu)}
+          className={`format-button format-button--more ${moreMenu ? "is-active" : ""}`.trim()}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            setMoreMenu((current) => (current ? null : rect));
+          }}
+        ><MoreIcon size={15}/></button>
       </div>
 
       {colorMenu && (
@@ -736,6 +1241,27 @@ export function Toolbar({ onStatus, onHome, onNewDocument, onOpenDocument, onSav
           defaultLabel={colorMenu.kind === "fore" ? "Default color" : "No highlight"}
           onPick={(color) => pickColor(colorMenu.kind, color)}
           onClose={() => setColorMenu(null)}
+        />
+      )}
+
+      {moreMenu && (
+        <MoreFormattingMenu
+          anchor={moreMenu}
+          format={format}
+          anchorState={anchorState}
+          onAction={runMoreAction}
+          onClose={() => setMoreMenu(null)}
+        />
+      )}
+
+      {linkMenu && (
+        <LinkMenu
+          anchor={linkMenu.anchor}
+          initialHref={linkMenu.href}
+          inLink={linkMenu.inLink}
+          onApply={applyLinkFromMenu}
+          onRemove={removeLinkFromMenu}
+          onClose={() => setLinkMenu(null)}
         />
       )}
 

@@ -124,6 +124,18 @@ export class DocumentSession {
     return this.run({ kind: "edit_drawing", pageId, strokes, mode, baseRevision: this.revision });
   }
 
+  readDrawing(pageId) {
+    return this.run({ kind: "read_drawing", pageId });
+  }
+
+  deleteStrokes(pageId, strokeIds) {
+    return this.run({ kind: "delete_strokes", pageId, strokeIds, baseRevision: this.revision });
+  }
+
+  modifyStrokes(pageId, changes) {
+    return this.run({ kind: "modify_strokes", pageId, ...changes, baseRevision: this.revision });
+  }
+
   insertVersions(afterPageId, variants, activeIndex) {
     return this.run({ kind: "insert_versions", afterPageId, variants, activeIndex, baseRevision: this.revision });
   }
@@ -329,7 +341,7 @@ const variantsSchema = {
     type: "object",
     properties: {
       label: { type: "string" },
-      html: { type: "string" }
+      html: { type: "string", description: "Same HTML vocabulary as append_text, including the rich structures (checklists, text-table tables, math-field spans)." }
     },
     required: ["html"],
     additionalProperties: false
@@ -344,7 +356,7 @@ const variantsSchema = {
 export const inktileTools = [
   {
     name: "read_document",
-    description: "Read the open inktile: title, pageWidth (the fixed pixel width every row spans), page rows (the visual layout, up to 4 pages side by side per row), and every page's component, current HTML, notes, row height in px, rendered tile width in px (widthPx), width fraction, vertical alignment, versions (all drafts + active index), drawing stroke counts, and each image/video's intrinsic width/height in px. Call it before working — unless your instructions say the document is unchanged since your last turn — and again whenever an edit is rejected because the document changed.",
+    description: "Read the open inktile: title, pageWidth (the fixed pixel width every row spans), page rows (the visual layout, up to 4 pages side by side per row), and every page's component, current HTML, notes, row height in px, rendered tile width in px (widthPx), width fraction, vertical alignment, versions (all drafts + active index), drawing stroke summaries (per-stroke id, tool, width, opacity, point count, bounds — read_drawing returns the points), and each image/video's intrinsic width/height in px. Call it before working — unless your instructions say the document is unchanged since your last turn — and again whenever an edit is rejected because the document changed.",
     annotations: READ,
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: async ({ document }) => {
@@ -354,7 +366,7 @@ export const inktileTools = [
   },
   {
     name: "append_text",
-    description: "Append HTML to the end of an existing text page. Stream your writing with many small appends (a sentence or two at a time) so the user watches the text arrive; never buffer a whole page into one call. Basic inline HTML only (p, br, b, i, u, span, headings).",
+    description: "Append HTML to the end of an existing text page. Stream your writing with many small appends (a sentence or two at a time) so the user watches the text arrive; never buffer a whole page into one call. If the page shares its row with an image or video, keep the total text caption-length — the text's height stretches the whole row and letterboxes the media. Basic inline HTML (p, br, b, i, u, span, headings, ul/ol lists, and <a href> links — http/https/mailto only) plus the app's rich structures: checklists (<ul class=\"checklist\"> with <li data-checked=\"true|false\">), tables (<table class=\"text-table\"> with plain tr/th/td), and LaTeX math fields (<span class=\"math-field\" data-tex=\"a^2+b^2=c^2\" data-display=\"false\" contenteditable=\"false\"></span> — keep the element EMPTY; the app renders the TeX itself, and data-display=\"true\" makes it a centered block).",
     annotations: WRITE,
     inputSchema: {
       type: "object",
@@ -369,7 +381,7 @@ export const inktileTools = [
   },
   {
     name: "edit_text",
-    description: "Replace the entire HTML content of an existing text page. Prefer append_text for new writing; use this only to revise what a page already contains.",
+    description: "Replace the entire HTML content of an existing text page. Prefer append_text for new writing; use this only to revise what a page already contains. Same HTML vocabulary as append_text, including the rich structures (checklists, text-table tables, math-field spans).",
     annotations: WRITE,
     inputSchema: {
       type: "object",
@@ -384,7 +396,7 @@ export const inktileTools = [
   },
   {
     name: "insert_page",
-    description: "Insert a new text page (its own row) after the given page, or at the end when after_page_id is omitted. Optionally seed it with initial HTML; keep seeding short and continue with append_text. Every page owns exactly one component.",
+    description: "Insert a new text page (its own row) after the given page, or at the end when after_page_id is omitted. Optionally seed it with initial HTML (same vocabulary as append_text); keep seeding short and continue with append_text. Every page owns exactly one component.",
     annotations: WRITE,
     inputSchema: {
       type: "object",
@@ -401,7 +413,7 @@ export const inktileTools = [
   },
   {
     name: "arrange_pages",
-    description: "Move a page relative to another: before/after stacks it vertically as its own row; left/right places it side by side in the target's row (a row holds at most four pages).",
+    description: "Move a page relative to another: before/after stacks it vertically as its own row; left/right places it side by side in the target's row (a row holds at most four pages). All pages in a row share one height, and the tallest tile's content sets its floor — so never place an image or video beside a long text passage (the media letterboxes in dead space while the text becomes a thin column). Pair media only with caption-length text; long passages and their media belong in separate stacked rows.",
     annotations: WRITE,
     inputSchema: {
       type: "object",
@@ -479,7 +491,7 @@ export const inktileTools = [
   },
   {
     name: "edit_notes",
-    description: "Write the back face (\"notes\") of any page — every page has one, shown when the user flips the tile. Replaces the whole notes HTML; read_document returns current notes as notesHtml.",
+    description: "Write the back face (\"notes\") of any page — every page has one, shown when the user flips the tile. Replaces the whole notes HTML (same vocabulary as append_text, rich structures included); read_document returns current notes as notesHtml.",
     annotations: WRITE,
     inputSchema: {
       type: "object",
@@ -510,7 +522,7 @@ export const inktileTools = [
   },
   {
     name: "set_row_height",
-    description: "Resize a row: sets the shared height (in px, 96-1600) of the row containing the given page. All pages in a row share one height; media and drawings fill it. To show an image or video without dead space, set the height to about the tile's widthPx × asset height ÷ asset width.",
+    description: "Resize a row: sets the shared height in px of the row containing the given page. All pages in a row share one height; media and drawings fill it. Heights clamp to the app's real range — 96-1600px, with content floors raising the minimum (image/video rows 120, versions rows 164, drawing rows 240) — and the result reports the applied value. To show an image or video without dead space, set the height to about the tile's widthPx × asset height ÷ asset width.",
     annotations: WRITE,
     inputSchema: {
       type: "object",
@@ -519,13 +531,13 @@ export const inktileTools = [
       additionalProperties: false
     },
     run: async ({ document }, args) => {
-      await document.setRowHeight(String(args.page_id), Number(args.height));
-      return "Row resized.";
+      const result = await document.setRowHeight(String(args.page_id), Number(args.height));
+      return result.height !== undefined ? `Row resized to ${result.height}px.` : "Row resized.";
     }
   },
   {
     name: "set_row_widths",
-    description: "Change how the pages of one multi-page row split its width: pass one fraction per page in left-to-right order (they are normalized to sum to 1; each page needs at least 8%). Identify the row by any page in it.",
+    description: "Change how the pages of one multi-page row split its width: pass one fraction per page in left-to-right order (they are normalized to sum to 1). Identify the row by any page in it. Every column must keep at least 120px of the document width (about 16% at the default 760px) — the same floor the app's own drag enforces; narrower splits are rejected with the required minimum.",
     annotations: WRITE,
     inputSchema: {
       type: "object",
@@ -555,7 +567,7 @@ export const inktileTools = [
   },
   {
     name: "create_drawing",
-    description: "Insert a new drawing page after the given page (or at the end) and draw the given strokes onto it. Coordinates are normalized 0..1 (x across the page width, y down the canvas height); the canvas is the full page card, height in px (240-1600, default 240). Build shapes from polyline points — many short segments make smooth curves.",
+    description: "Insert a new drawing page after the given page (or at the end) and draw the given strokes onto it. Coordinates are normalized 0..1 (x across the page width, y down the canvas height); the canvas is the full page card, height in px (240-1600, default 240). Build shapes from polyline points — many short segments make smooth curves. The canvas is not square (widthPx wide × height px tall), so correct shapes for that aspect ratio — equal 0..1 extents are not equal on screen.",
     annotations: WRITE,
     inputSchema: {
       type: "object",
@@ -574,7 +586,7 @@ export const inktileTools = [
   },
   {
     name: "edit_drawing",
-    description: "Draw onto an existing drawing page. mode \"append\" (default) adds the strokes on top of what is there; \"replace\" clears the canvas first. Coordinates are normalized 0..1. Eraser strokes remove ink where they pass.",
+    description: "Draw onto an existing drawing page. mode \"append\" (default) adds the strokes on top of what is there; \"replace\" clears the canvas first. Coordinates are normalized 0..1. Eraser strokes remove ink where they pass — but only ink painted before them; to remove or rework whole strokes, prefer delete_strokes/modify_strokes.",
     annotations: WRITE,
     inputSchema: {
       type: "object",
@@ -585,6 +597,70 @@ export const inktileTools = [
     run: async ({ document }, args) => {
       await document.editDrawing(String(args.page_id), args.strokes, args.mode === "replace" ? "replace" : "append");
       return "Drawing updated.";
+    }
+  },
+  {
+    name: "read_drawing",
+    description: "Read a drawing page's full stroke data: every stroke's id, tool, width, opacity, and points (normalized 0..1), plus the canvas height and rendered width in px. Strokes list in paint order — erasers only erase ink painted before them. Use the ids with modify_strokes/delete_strokes.",
+    annotations: READ,
+    inputSchema: {
+      type: "object",
+      properties: { page_id: stringProp },
+      required: ["page_id"],
+      additionalProperties: false
+    },
+    run: async ({ document }, args) => {
+      const result = await document.readDrawing(String(args.page_id));
+      return JSON.stringify(result.drawing);
+    }
+  },
+  {
+    name: "modify_strokes",
+    description: "Edit existing strokes on a drawing page by id: move them by dx/dy (normalized 0..1 units), scale them about origin_x/origin_y (default: the selection's center), and/or restyle tool, width (px 1-24), or opacity (0-1) — thicken a line, turn it into a highlighter, nudge a shape into place. Ink moved past the canvas edge is hidden, not deleted.",
+    annotations: WRITE,
+    inputSchema: {
+      type: "object",
+      properties: {
+        page_id: stringProp,
+        stroke_ids: { type: "array", items: stringProp },
+        dx: { type: "number" },
+        dy: { type: "number" },
+        scale: { type: "number", description: "Uniform scale factor (> 0)." },
+        origin_x: { type: "number" },
+        origin_y: { type: "number" },
+        tool: { type: "string", enum: ["pen", "highlighter", "eraser"] },
+        width: { type: "number" },
+        opacity: { type: "number" }
+      },
+      required: ["page_id", "stroke_ids"],
+      additionalProperties: false
+    },
+    run: async ({ document }, args) => {
+      const changes = { strokeIds: Array.isArray(args.stroke_ids) ? args.stroke_ids.map(String) : [] };
+      for (const key of ["dx", "dy", "scale", "width", "opacity"]) {
+        if (args[key] !== undefined) changes[key] = Number(args[key]);
+      }
+      if (args.origin_x !== undefined) changes.originX = Number(args.origin_x);
+      if (args.origin_y !== undefined) changes.originY = Number(args.origin_y);
+      if (args.tool !== undefined) changes.tool = String(args.tool);
+      await document.modifyStrokes(String(args.page_id), changes);
+      return "Strokes updated.";
+    }
+  },
+  {
+    name: "delete_strokes",
+    description: "Remove specific strokes from a drawing page by id — precise erasing that cannot smudge neighboring ink. Prefer this over painting eraser strokes when whole strokes should go; read_drawing lists the ids.",
+    annotations: WRITE,
+    inputSchema: {
+      type: "object",
+      properties: { page_id: stringProp, stroke_ids: { type: "array", items: stringProp } },
+      required: ["page_id", "stroke_ids"],
+      additionalProperties: false
+    },
+    run: async ({ document }, args) => {
+      const ids = Array.isArray(args.stroke_ids) ? args.stroke_ids.map(String) : [];
+      await document.deleteStrokes(String(args.page_id), ids);
+      return `Deleted ${ids.length} stroke(s).`;
     }
   },
   {

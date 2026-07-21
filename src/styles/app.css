@@ -1,3 +1,27 @@
+/* Inter — self-hosted variable font (SIL OFL 1.1; see assets/fonts/Inter-LICENSE.txt).
+   Bundled so the UI renders in its intended typeface rather than the OS default
+   sans-serif on machines that don't have Inter installed. One file spans 100-900. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../assets/fonts/InterVariable.woff2") format("woff2");
+}
+
+/* Editor document fonts — curated open-source (SIL OFL 1.1) variable faces, self-hosted
+   so a tile renders the same on every machine regardless of what's installed locally.
+   Each is a Latin-subset variable file (weights clamp to the font's real axis range) and
+   font-display: swap means a face is only fetched when a tile actually uses it. Family
+   names must stay in sync with FONT_FAMILIES in src/components/Toolbar.tsx. */
+@font-face { font-family: "Work Sans"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("../assets/fonts/WorkSans.woff2") format("woff2"); }
+@font-face { font-family: "Lora"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("../assets/fonts/Lora.woff2") format("woff2"); }
+@font-face { font-family: "Source Serif 4"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("../assets/fonts/SourceSerif4.woff2") format("woff2"); }
+@font-face { font-family: "Fraunces"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("../assets/fonts/Fraunces.woff2") format("woff2"); }
+@font-face { font-family: "Playfair Display"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("../assets/fonts/PlayfairDisplay.woff2") format("woff2"); }
+@font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("../assets/fonts/SpaceGrotesk.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("../assets/fonts/JetBrainsMono.woff2") format("woff2"); }
+
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color-scheme: light;
@@ -17,6 +41,16 @@
   --library-accent-ink: #f6f7f3;
   --danger: #a33d36;
   --shadow: 0 1px 2px rgba(20, 20, 18, 0.08), 0 8px 24px rgba(20, 20, 18, 0.035);
+  /* A compact, rounded ink-line cursor family. SVGs stay monochrome so cursors feel
+     like part of the icon system; explicit theme variants avoid OS cursor colors. */
+  --cursor-default: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 2.8 18.5 13l-7.1 1.1-4.2 6.1z' fill='%231d1d1b' stroke='%23fff' stroke-width='1.2' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, default;
+  --cursor-pointer: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M8.5 13V6.8a2 2 0 0 1 4 0v4.7-2a2 2 0 0 1 4 0v2-1a2 2 0 0 1 4 0v1.7a2 2 0 0 1 3.5 1.3v4.2c0 5-3.2 7.3-7.5 7.3h-1.2c-3 0-4.7-1.3-6.4-3.8l-3.6-5.1a2 2 0 0 1 3.2-2.4l2 2.2' fill='%231d1d1b' stroke='%23fff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 8 6, pointer;
+  --cursor-text: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='28' viewBox='0 0 24 28'%3E%3Cpath d='M8 3h8M12 3v22M8 25h8' fill='none' stroke='%231d1d1b' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") 12 14, text;
+  --cursor-crosshair: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Ccircle cx='14' cy='14' r='4.5' fill='none' stroke='%231d1d1b' stroke-width='1.6'/%3E%3Cpath d='M14 3v6.5M14 18.5V25M3 14h6.5M18.5 14H25' stroke='%231d1d1b' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 14 14, crosshair;
+  --cursor-grab: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M7 13V9.5a1.8 1.8 0 0 1 3.6 0V12 7.5a1.8 1.8 0 0 1 3.6 0V12 8.7a1.8 1.8 0 0 1 3.6 0V12v-1.8a1.8 1.8 0 0 1 3.6 0v7.3c0 4.7-3 7.5-7.4 7.5s-6-2.4-7.8-5.3l-2-3.2A1.8 1.8 0 0 1 7 14.4l1.8 2.1' fill='%231d1d1b' stroke='%23fff' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 14 13, grab;
+  --cursor-grabbing: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M7.2 12.2v-1.4a1.8 1.8 0 0 1 3.6 0v1-2.3a1.8 1.8 0 0 1 3.6 0v2.3-1.6a1.8 1.8 0 0 1 3.6 0v2.1a1.8 1.8 0 0 1 3.6.2v5c0 4.8-3 7.5-7.3 7.5-4 0-5.8-2-7.7-5l-2.2-3.5a1.8 1.8 0 0 1 2.8-2.2l1.7 1.9' fill='%231d1d1b' stroke='%23fff' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 14 13, grabbing;
+  --cursor-ew-resize: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='24' viewBox='0 0 30 24'%3E%3Cpath d='m8 7-5 5 5 5M22 7l5 5-5 5M4 12h22' fill='none' stroke='%231d1d1b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 15 12, ew-resize;
+  --cursor-ns-resize: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='30' viewBox='0 0 24 30'%3E%3Cpath d='m7 8 5-5 5 5M7 22l5 5 5-5M12 4v22' fill='none' stroke='%231d1d1b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 12 15, ns-resize;
 }
 
 :root[data-theme="dark"] {
@@ -37,16 +71,44 @@
   --library-accent-ink: #141a2c;
   --danger: #d26b62;
   --shadow: 0 1px 2px rgba(0,0,0,.25), 0 12px 28px rgba(0,0,0,.12);
+  --cursor-default: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 2.8 18.5 13l-7.1 1.1-4.2 6.1z' fill='%23fff' stroke='%23171816' stroke-width='1.2' stroke-linejoin='round'/%3E%3C/svg%3E") 4 3, default;
+  --cursor-pointer: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M8.5 13V6.8a2 2 0 0 1 4 0v4.7-2a2 2 0 0 1 4 0v2-1a2 2 0 0 1 4 0v1.7a2 2 0 0 1 3.5 1.3v4.2c0 5-3.2 7.3-7.5 7.3h-1.2c-3 0-4.7-1.3-6.4-3.8l-3.6-5.1a2 2 0 0 1 3.2-2.4l2 2.2' fill='%23fff' stroke='%23171816' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 8 6, pointer;
+  --cursor-text: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='28' viewBox='0 0 24 28'%3E%3Cpath d='M8 3h8M12 3v22M8 25h8' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") 12 14, text;
+  --cursor-crosshair: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Ccircle cx='14' cy='14' r='4.5' fill='none' stroke='%23fff' stroke-width='1.6'/%3E%3Cpath d='M14 3v6.5M14 18.5V25M3 14h6.5M18.5 14H25' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 14 14, crosshair;
+  --cursor-grab: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M7 13V9.5a1.8 1.8 0 0 1 3.6 0V12 7.5a1.8 1.8 0 0 1 3.6 0V12 8.7a1.8 1.8 0 0 1 3.6 0V12v-1.8a1.8 1.8 0 0 1 3.6 0v7.3c0 4.7-3 7.5-7.4 7.5s-6-2.4-7.8-5.3l-2-3.2A1.8 1.8 0 0 1 7 14.4l1.8 2.1' fill='%23fff' stroke='%23171816' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 14 13, grab;
+  --cursor-grabbing: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M7.2 12.2v-1.4a1.8 1.8 0 0 1 3.6 0v1-2.3a1.8 1.8 0 0 1 3.6 0v2.3-1.6a1.8 1.8 0 0 1 3.6 0v2.1a1.8 1.8 0 0 1 3.6.2v5c0 4.8-3 7.5-7.3 7.5-4 0-5.8-2-7.7-5l-2.2-3.5a1.8 1.8 0 0 1 2.8-2.2l1.7 1.9' fill='%23fff' stroke='%23171816' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 14 13, grabbing;
+  --cursor-ew-resize: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='24' viewBox='0 0 30 24'%3E%3Cpath d='m8 7-5 5 5 5M22 7l5 5-5 5M4 12h22' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 15 12, ew-resize;
+  --cursor-ns-resize: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='30' viewBox='0 0 24 30'%3E%3Cpath d='m7 8 5-5 5 5M7 22l5 5 5-5M12 4v22' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 12 15, ns-resize;
 }
 
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; margin: 0; }
-body { background: var(--app-bg); color: var(--text); }
+body { background: var(--app-bg); color: var(--text); cursor: var(--cursor-default); }
 button, input, select { font: inherit; color: inherit; }
 select option { background-color: var(--page-bg); color: var(--text); }
+/* Group headers (the font picker's <optgroup label>) otherwise keep Chromium's default label
+   color, which collides with the dark popup background. Give them explicit, muted-but-readable
+   colors of our own. */
+select optgroup { background-color: var(--page-bg); color: var(--muted); }
+/* Options carrying author styles (e.g. the font picker's per-typeface preview) force Chromium's
+   custom <select> popup, which paints its own highlight on the checked/hovered row while our
+   `color: var(--text)` stays put — in dark mode that lands light text on a light highlight. Give
+   those rows explicit contrasting colors so the text can never match its background. */
+select option:checked, select option:hover, select option:focus { background-color: var(--selected); color: var(--page-bg); }
 :root[data-theme="dark"] select { color-scheme: dark; }
-button { cursor: pointer; }
-button:disabled { cursor: default; opacity: .35; }
+button, a, label, [role="button"] { cursor: var(--cursor-pointer) !important; }
+button:disabled, [aria-disabled="true"] { cursor: var(--cursor-default) !important; opacity: .35; }
+input, textarea, [contenteditable="true"] { cursor: var(--cursor-text) !important; }
+
+/* Semantic cursor assignments. Keep these centralized so new controls inherit the
+   themed family instead of quietly falling back to a platform-specific cursor. */
+:is(.tag-dialog__swatch--custom, .tag-dialog__swatch--custom input, .page-row-top-edge, .page-row-side-edge, .text-checkbox, .math-field) { cursor: var(--cursor-pointer) !important; }
+:is(.row-scrollbar__handle, .workspace-scrollbar__handle, .element-scrollbar__handle, .page-handle__drag) { cursor: var(--cursor-grab) !important; }
+:is(.inktile-grid--row.is-panning, .row-scrollbar.is-active .row-scrollbar__handle, .workspace-scrollbar.is-active .workspace-scrollbar__handle, .element-scrollbar.is-active .element-scrollbar__handle, .page-handle__drag:active, .is-page-dragging, .is-page-dragging *) { cursor: var(--cursor-grabbing) !important; }
+:is(.page-column-resize-handle, .inkjet-panel__resize) { cursor: var(--cursor-ew-resize) !important; }
+.page-row-resize-handle { cursor: var(--cursor-ns-resize) !important; }
+.drawing-canvas { cursor: none !important; }
+:is(.text-block, .variant-editor) a { cursor: var(--cursor-text) !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 :focus-visible { outline: 2px solid var(--selected); outline-offset: 2px; }
 
@@ -58,6 +120,12 @@ button:disabled { cursor: default; opacity: .35; }
   zoom: var(--ui-scale, 1);
 }
 .app-shell--library { background: var(--app-bg); }
+/* Web-only strip shown while the browser withholds durable storage (see storageAtRisk in App). */
+.storage-warning { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 7px 16px; border-bottom: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line)); background: color-mix(in srgb, var(--danger) 7%, var(--app-bg)); color: var(--text); }
+.storage-warning p { margin: 0; font-size: 11.5px; }
+.storage-warning button { border: 0; background: none; color: var(--muted); font-size: 15px; line-height: 1; padding: 2px 6px; cursor: pointer; }
+.storage-warning button:hover { color: var(--text); }
+
 .library-boot { min-height: calc(100vh * var(--ui-scale-inverse, 1)); display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--muted); }
 .library-boot img { width: 72px; height: 72px; border-radius: 16px; object-fit: cover; }
 .library-boot p { margin: 0; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
@@ -99,6 +167,20 @@ button:disabled { cursor: default; opacity: .35; }
 .library-cardsize button:hover { background: var(--hover); color: var(--text); }
 .library-cardsize button.is-active { background: var(--library-accent); color: var(--library-accent-ink); }
 
+/* Tag filter bar: one chip per tag, sitting between the toolbar and the grids. Left-clicking a
+   chip toggles it as a filter (several chips combine as AND); right-clicking opens the edit
+   dialog. Tag hues render identically in both themes, matching the editor's color contract. */
+.library-tagbar { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: -6px 0 24px; }
+.library-tagbar > svg { flex: 0 0 auto; color: var(--subtle); }
+.library-tag-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; background: transparent; padding: 3px 9px 3px 7px; color: var(--muted); font-size: 10px; font-weight: 600; }
+.library-tag-chip:hover { border-color: color-mix(in srgb, var(--library-accent) 55%, var(--line)); background: var(--page-bg); color: var(--text); }
+.library-tag-chip.is-active { border-color: var(--library-accent); background: var(--library-accent); color: var(--library-accent-ink); }
+.library-tag-chip__dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .18); }
+.library-tag-chip.is-active .library-tag-chip__dot { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .18), 0 0 0 1px color-mix(in srgb, var(--library-accent-ink) 55%, transparent); }
+.library-tag-chip__count { opacity: .65; font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 8.5px; }
+.library-tagbar__clear { border: 0; background: transparent; color: var(--muted); padding: 2px 4px; font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+.library-tagbar__clear:hover { color: var(--text); }
+
 .library-result-summary { margin: 0 0 18px; color: var(--muted); font-size: 11px; }
 /* Fixed column *count* per card size (small 6, medium 5, large 4), flexing to fill the row. The
    pinned shelf mirrors the same per-card width via calc() (see below), so a card is the same size
@@ -126,6 +208,12 @@ button:disabled { cursor: default; opacity: .35; }
 .inktile-card__rename > div { display: flex; gap: 6px; }
 .inktile-card__rename button { height: 26px; border: 1px solid var(--line); border-radius: 3px; background: var(--page-bg); padding: 0 9px; font-size: 9px; }
 .inktile-card__rename button:first-child { border-color: var(--library-accent); background: var(--library-accent); color: var(--library-accent-ink); }
+/* Tag dots pinned to a card's top-right corner. The halo ring in --page-bg keeps a dot legible
+   over the title text it may sit near; clicking a dot filters the library to that tag. */
+.inktile-card__tags { position: absolute; top: 10px; right: 10px; z-index: 3; display: flex; align-items: center; gap: 4px; }
+.inktile-card__tag-dot { width: 9px; height: 9px; flex: 0 0 auto; border: 0; border-radius: 50%; padding: 0; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .18), 0 0 0 2px var(--page-bg); transition: transform .12s ease; }
+.inktile-card__tag-dot:hover { transform: scale(1.35); }
+.inktile-card__tag-more { color: var(--subtle); font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 8px; font-weight: 700; }
 
 /* Card size variants. Medium matches the base styles above. */
 .inktile-grid--small { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
@@ -202,6 +290,15 @@ button:disabled { cursor: default; opacity: .35; }
 .library-empty h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 22px; font-style: italic; letter-spacing: -.01em; }
 .library-empty > p:not(.library-eyebrow) { max-width: 420px; margin: 9px 0 18px; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .library-empty .library-button + .library-button { margin-top: 8px; }
+/* Empty library while a file is dragged: the whole screen accepts the drop, and the empty-state
+   panel lifts above the drop scrim (z 450) as the lit landing zone, mirroring the Open card's
+   drop treatment. Solid background so the scrim doesn't bleed through. */
+.library-empty.is-drop-target {
+  position: relative; z-index: 451; border-style: solid; border-color: var(--library-accent);
+  background: color-mix(in srgb, var(--library-accent) 8%, var(--app-bg));
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--library-accent) 40%, transparent), 0 12px 26px rgba(20,20,18,.24);
+}
+.library-empty.is-drop-target .library-empty__pages span:nth-child(3) { border-color: var(--library-accent); }
 
 /* File-drag spotlight: a dark, lightly blurred mask over the whole library. The Open card sits at
    z-index 451 and pokes through this 450 scrim, so it stays lit while everything else is dimmed.
@@ -221,6 +318,23 @@ button:disabled { cursor: default; opacity: .35; }
 .export-option:hover { border-color: color-mix(in srgb, var(--library-accent) 55%, var(--line)); background: var(--app-bg); }
 .export-option strong { font-size: 12px; }
 .export-option span { color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+
+/* Tag create/edit dialog: name field, preset swatches, and a free-pick color well. */
+.tag-dialog__form { margin-top: 18px; }
+.tag-dialog__name { width: 100%; border: 0; border-bottom: 1px solid var(--line); outline: none; background: transparent; padding: 5px 1px; font-size: 13px; }
+.tag-dialog__name:focus { border-bottom-color: var(--library-accent); }
+.tag-dialog__swatches { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 16px 0 24px; }
+.tag-dialog__swatch { position: relative; width: 22px; height: 22px; flex: 0 0 auto; border: 0; border-radius: 50%; padding: 0; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .18); }
+.tag-dialog__swatch:hover { transform: scale(1.12); }
+.tag-dialog__swatch.is-active { outline: 2px solid var(--text); outline-offset: 2px; }
+/* The custom well is the native color input itself, restyled into a swatch-sized circle; a
+   conic rainbow ring advertises "any color" until a custom pick covers it (span overlay). */
+.tag-dialog__swatch--custom { display: grid; place-items: center; background: conic-gradient(#c0392b, #d4a017, #27ae60, #2f80cf, #8e44ad, #c0392b); cursor: pointer; }
+.tag-dialog__swatch--custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.tag-dialog__swatch--custom span { position: absolute; inset: 0; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .18); pointer-events: none; }
+.tag-dialog__swatch--custom:has(input:focus-visible) { outline: 2px solid var(--selected); outline-offset: 2px; }
+.tag-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; }
+.tag-dialog__delete { margin-right: auto; }
 
 /* Home right-click context menu (portaled to <body>, positioned at the cursor). */
 .home-menu { position: fixed; z-index: 600; width: 258px; max-width: calc(100vw - 16px); border: 1px solid var(--line); border-radius: 4px; background: var(--page-bg); box-shadow: 0 18px 48px rgba(20,20,18,.20); padding: 5px; outline: none; animation: home-menu-in .1s ease; }
@@ -242,6 +356,24 @@ button:disabled { cursor: default; opacity: .35; }
 .home-menu__item--danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 9%, transparent); }
 .home-menu__item--danger:hover:not(:disabled) svg { color: var(--danger); }
 .home-menu__sep { height: 1px; margin: 4px 6px; background: color-mix(in srgb, var(--line) 70%, transparent); }
+/* Tags section of the home menu: applied tags with hover-revealed remove buttons, then an
+   expandable picker listing the remaining tags plus "New tag…". */
+.home-menu__tags { padding: 2px 3px 0; }
+.home-menu__tags .home-menu__eyebrow { margin: 3px 7px 4px; }
+.home-menu__tag-row { display: flex; align-items: center; gap: 8px; border-radius: 3px; padding: 3px 4px 3px 7px; font-size: 11.5px; }
+.home-menu__tag-row:hover { background: var(--hover); }
+.home-menu__tag-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .18); }
+.home-menu__tag-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-menu__tag-remove { width: 19px; height: 19px; flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 3px; background: transparent; color: var(--muted); padding: 0; opacity: 0; }
+.home-menu__tag-row:hover .home-menu__tag-remove, .home-menu__tag-remove:focus-visible { opacity: 1; }
+.home-menu__tag-remove:hover { background: color-mix(in srgb, var(--danger) 9%, transparent); color: var(--danger); }
+.home-menu__tag-empty { margin: 0; padding: 2px 7px 5px; color: var(--subtle); font-size: 10.5px; }
+.home-menu__item-caret { margin-left: auto; display: inline-flex; color: var(--subtle); }
+.home-menu__tag-picker { max-height: 168px; overflow-y: auto; margin: 1px 3px 3px; border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); border-radius: 4px; padding: 3px; }
+.home-menu__tag-option { width: 100%; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 3px; background: transparent; padding: 6px 7px; color: var(--text); font-size: 11.5px; text-align: left; }
+.home-menu__tag-option:hover { background: var(--hover); }
+.home-menu__tag-option--new { color: var(--library-accent); font-weight: 600; }
+.home-menu__tag-option--new svg { flex: 0 0 auto; }
 
 .library-settings-dialog { align-items: start; justify-items: end; padding: 28px; }
 .library-settings-panel { position: relative; width: min(510px, 100%); overflow: hidden; border: 1px solid var(--line); background: var(--page-bg); box-shadow: 0 24px 70px rgba(20,20,18,.17); }
@@ -376,9 +508,10 @@ button:disabled { cursor: default; opacity: .35; }
   content: ""; position: absolute; inset: 0; z-index: 6; pointer-events: none;
   box-shadow: inset 0 0 0 2px var(--selected);
 }
-/* The left handle carries the same inset ring: grouped-row handles sit flush side by
-   side (30px stride, 30px wide), so an outside ring would bleed into its neighbor. */
-.page-wrapper.is-selected .page-handle { opacity: 1; background: var(--hover); outline: 2px solid var(--selected); outline-offset: -2px; }
+/* The left handle carries the same inset ring: grouped-row handles stack 35px apart (32px wide,
+   3px apart), so an outside ring would bleed into its neighbor. The ring alone marks selection —
+   the handle keeps its solid rail fill so it stays matched with the right tool rail. */
+.page-wrapper.is-selected .page-handle { opacity: 1; outline: 2px solid var(--selected); outline-offset: -2px; }
 .is-page-dragging, .is-page-dragging * { cursor: grabbing !important; user-select: none !important; }
 .page-row.drop-before::before, .page-row.drop-after::after {
   content: ""; position: absolute; z-index: 30; left: 0; right: 0; height: 2px; background: var(--selected); pointer-events: none;
@@ -388,9 +521,9 @@ button:disabled { cursor: default; opacity: .35; }
 .page-wrapper.drop-left::before, .page-wrapper.drop-right::after { content: ""; position: absolute; z-index: 30; top: 0; bottom: 0; width: 2px; background: var(--selected); pointer-events: none; }
 .page-wrapper.drop-left::before { left: -1px; }
 .page-wrapper.drop-right::after { right: -1px; }
-/* The page front and the notes back share one grid cell, so the card is always sized to the
-   taller of the two sides and never changes size when flipping. `perspective` gives the flip
-   animation its depth. */
+/* The card is sized by the FRONT face alone: the notes back is absolutely positioned over
+   the same box and scrolls internally when its content is taller (see .page-face--back), so
+   flipping never changes the card's size. `perspective` gives the flip animation its depth. */
 .page-card {
   position: relative; min-width: 0; min-height: 96px; background: var(--page-bg); box-shadow: var(--shadow);
   display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(min-content, 1fr);
@@ -404,16 +537,27 @@ button:disabled { cursor: default; opacity: .35; }
    the card instead of the compact text minimum letting it stick out below the page. */
 .page-card--variants { min-height: 164px; }
 
-/* Both faces are stacked in the same cell (grid-area 1/1). Only the active one is shown and
-   interactive; the inactive one stays laid out (so it keeps contributing to the fixed size). */
+/* The front face is the card's only in-flow child and defines its height; the back face
+   overlays the same box (absolute, below). Only the active one is shown and interactive. */
 .page-face {
   grid-area: 1 / 1; min-width: 0; display: flex; flex-direction: column;
   transition: opacity .26s ease, transform .34s cubic-bezier(.33, .12, .18, 1);
 }
 .page-face .page-blocks { width: 100%; }
+.page-face--back { position: absolute; inset: 0; }
+/* Notes taller than the front scroll inside the card instead of growing it: the blocks list
+   is the scroller (native bar hidden; the shared ElementScrollbar overlay drives it). When
+   the notes are shorter, the list stays content-sized so the align classes still apply. */
+.page-face--back .page-blocks { min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.page-face--back .page-blocks::-webkit-scrollbar { width: 0; height: 0; display: none; }
+/* Track starts below the "Notes" side label (top 4px, ~10px tall) so they don't overlap. */
+.notes-scrollbar { top: 18px; bottom: 6px; right: 2px; }
 .page-face--align-top { justify-content: flex-start; }
 .page-face--align-center { justify-content: center; }
 .page-face--align-bottom { justify-content: flex-end; }
+/* An audio front holds a single short player bar; keep it vertically centered in the
+   tile regardless of the page's vertical anchor. */
+.page-face--front.page-face--audio { justify-content: center; }
 .page-face.is-active { opacity: 1; transform: none; }
 /* Inactive faces fade out and hinge away from the page's inner spine (left edge) for a
    page-turn feel; kept flat (transform: none) at rest so text stays crisp. */
@@ -441,15 +585,29 @@ button:disabled { cursor: default; opacity: .35; }
 .page-face--media .block-shell { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; }
 .page-card.is-flipped { background: transparent; box-shadow: none; }
 .page-card.is-flipped::before { opacity: 1; }
+/* The left handle wears the exact same shell as the right tool rail (.page-tool-rail): same
+   width, padding, border, fill, shadow, radius, and icon color, so the two sides read as one
+   matched pair of floating rails. Keep these box styles in sync with .page-tool-rail. */
 .page-handle {
-  position: absolute; z-index: 8; left: var(--inktile-left-handle, -38px); top: 3px;
-  width: 30px; padding: 3px; border-radius: 8px; background: transparent; color: var(--subtle);
+  position: absolute; z-index: 8; left: var(--inktile-left-handle, -40px); top: 3px;
+  width: 32px; padding: 3px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--page-bg); box-shadow: var(--shadow); color: var(--muted);
   display: flex; flex-direction: column; align-items: stretch; gap: 2px; font-size: 9px; opacity: .28;
+  transition: opacity .15s ease;
 }
-.page-wrapper:hover .page-handle, .page-handle:focus-within { opacity: 1; background: var(--hover); }
+/* Handle visibility (Settings → Handle visibility; data-handles set on :root by App). One shared
+   treatment for both sides of a tile — this left control handle and the right tool rail (below):
+   "full" rests fully opaque, "ghost" (the default, matching the base opacity above) rests faded,
+   "hidden" rests invisible. In every mode, hovering the tile or the handle itself, keyboard focus
+   inside the handle, and tile selection restore full opacity. The reveal selectors carry the
+   .page-wrapper prefix so they out-rank the mode rules (and follow them for the specificity tie). */
+:root[data-handles="full"] .page-handle { opacity: 1; }
+:root[data-handles="hidden"] .page-handle { opacity: 0; }
+.page-wrapper:hover .page-handle, .page-wrapper .page-handle:focus-within, .page-wrapper.is-selected .page-handle { opacity: 1; }
 .page-handle__drag, .page-handle__notes, .page-handle__delete { width: 24px; border: 0; border-radius: 5px; background: transparent; color: inherit; display: flex; align-items: center; justify-content: center; }
 .page-handle__drag { min-height: 32px; flex-direction: column; gap: 1px; cursor: grab; user-select: none; touch-action: none; }
 .page-handle__notes, .page-handle__delete { min-height: 24px; }
+.page-handle__drag:hover { background: var(--hover); color: var(--text); }
 .page-handle__drag:active { cursor: grabbing; }
 .page-handle__notes:hover { color: var(--text); background: var(--hover); }
 .page-handle__delete:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
@@ -457,10 +615,105 @@ button:disabled { cursor: default; opacity: .35; }
 
 .block-shell { position: relative; min-width: 0; }
 .text-block, .variant-editor {
-  min-height: 26px; line-height: 1.55; outline: none; white-space: pre-wrap; overflow-wrap: anywhere; font-family: Arial, Helvetica, sans-serif; font-size: 15px;
+  min-height: 26px; line-height: 1.55; outline: none; white-space: pre-wrap; overflow-wrap: anywhere; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 15px;
 }
 .text-block:empty::before, .variant-editor:empty::before { content: attr(data-placeholder); color: var(--subtle); pointer-events: none; }
 .text-block ul, .text-block ol, .variant-editor ul, .variant-editor ol { margin: 4px 0; padding-left: 24px; }
+:is(.text-block, .variant-editor) hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+
+/* Links: stored as plain <a href>. A hue color per the theming contract (identical in both
+   themes). Plain click edits — the tile views intercept navigation; Ctrl+Click opens. */
+:is(.text-block, .variant-editor) a { color: #2f80cf; text-decoration: underline; text-underline-offset: 2px; cursor: text; }
+:is(.text-block, .variant-editor) a:hover { text-decoration-thickness: 2px; }
+
+/* Checklists: a decorated ul whose items carry data-checked. The box is a ::before in the
+   item's reserved left padding (so item content stays plain editable text) and the hit
+   region is matched by checklistHit() in richText.ts — keep the 22px gutter in sync. */
+:is(.text-block, .variant-editor) ul.checklist { list-style: none; padding-left: 4px; }
+:is(.text-block, .variant-editor) ul.checklist > li { position: relative; padding-left: 24px; }
+:is(.text-block, .variant-editor) ul.checklist > li::before {
+  content: ""; position: absolute; left: 1px; top: .3em; width: 13px; height: 13px;
+  border: 1.5px solid var(--dot); border-radius: 4px; background: var(--page-bg); cursor: pointer;
+}
+:is(.text-block, .variant-editor) ul.checklist > li[data-checked="true"]::before { background: var(--selected); border-color: var(--selected); }
+:is(.text-block, .variant-editor) ul.checklist > li[data-checked="true"]::after {
+  content: ""; position: absolute; left: 4.5px; top: calc(.3em + 3px); width: 7px; height: 4px;
+  border-left: 1.7px solid var(--page-bg); border-bottom: 1.7px solid var(--page-bg); transform: rotate(-45deg); cursor: pointer;
+}
+:is(.text-block, .variant-editor) ul.checklist > li[data-checked="true"] { color: var(--muted); text-decoration: line-through; }
+
+/* Tables: plain HTML tables in the editable flow; Tab walks cells, the text context menu
+   edits structure. Theme-variable borders keep both themes and the archive consistent. */
+:is(.text-block, .variant-editor) table.text-table { border-collapse: collapse; width: 100%; margin: 6px 0; table-layout: fixed; }
+:is(.text-block, .variant-editor) .text-table :is(th, td) { border: 1px solid var(--line); padding: 4px 8px; vertical-align: top; text-align: left; min-width: 24px; }
+:is(.text-block, .variant-editor) .text-table th { background: var(--surface); font-weight: 600; }
+
+/* Math fields: atomic non-editable spans; the KaTeX rendering lives in a shadow root
+   (stored HTML keeps only the TeX source). Click opens the math editor. */
+:is(.text-block, .variant-editor) .math-field { display: inline-block; margin: 0 1px; padding: 0 2px; border-radius: 4px; cursor: pointer; }
+:is(.text-block, .variant-editor) .math-field:hover { background: var(--hover); }
+:is(.text-block, .variant-editor) .math-field[data-display="true"] { display: block; text-align: center; margin: 6px 0; }
+
+/* The header's More-formatting dropdown: one horizontal row of format buttons, its
+   top-right corner hung off the More button's bottom-right (positioned in Toolbar.tsx). */
+.format-menu { position: fixed; z-index: 600; display: flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--page-bg); box-shadow: 0 18px 48px rgba(20,20,18,.20); padding: 4px; animation: home-menu-in .1s ease; zoom: var(--ui-scale, 1); }
+:root[data-theme="dark"] .format-menu { box-shadow: 0 18px 48px rgba(0,0,0,.45); }
+.format-menu__divider { width: 1px; height: 16px; flex: 0 0 auto; background: var(--line); margin: 0 3px; }
+.format-menu .format-button.is-active svg { color: var(--selected); }
+
+/* The link popover a plain click on a tile link opens: editable display text and
+   destination rows, an Open action, and a small, inert, zoomed-out live preview of the
+   page (with an explicit note when the site refuses embedding). */
+.link-preview { position: fixed; z-index: 600; width: 360px; display: flex; flex-direction: column; gap: 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--page-bg); box-shadow: 0 18px 48px rgba(20,20,18,.20); padding: 8px; animation: home-menu-in .1s ease; }
+:root[data-theme="dark"] .link-preview { box-shadow: 0 18px 48px rgba(0,0,0,.45); }
+.link-preview__row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.link-preview__label { width: 26px; flex: 0 0 auto; color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .04em; }
+.link-preview__row input { flex: 1; min-width: 0; height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); padding: 0 8px; font-size: 11.5px; outline: none; }
+.link-preview__favicon { width: 14px; height: 14px; flex: 0 0 auto; border-radius: 3px; }
+/* Desktop unfurl card: the page's own Open Graph image/title/description, fetched by the
+   native shell (fetch_link_metadata). Shown instead of the live embed when available. */
+.link-preview__card { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.link-preview__card img { display: block; width: 100%; max-height: 176px; object-fit: cover; background: var(--surface); }
+.link-preview__card-text { display: flex; flex-direction: column; gap: 3px; padding: 7px 9px; }
+.link-preview__card-title { font-size: 11.5px; font-weight: 650; color: var(--text); }
+.link-preview__card-desc { font-size: 10.5px; line-height: 1.45; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* A fixed white canvas: pages are rendered at ~1140px wide and scaled to fit. Until the
+   embed proves it loaded, the section is clipped to zero height (not display:none, which
+   could defer the load; the negative margin cancels the flex gap). */
+.link-preview__frame { position: relative; height: 190px; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; background: #fff; }
+.link-preview__frame--pending { height: 0; border: 0; margin-top: -7px; }
+.link-preview__frame object { width: 1140px; height: 634px; border: 0; transform: scale(.3); transform-origin: top left; pointer-events: none; }
+.link-preview__actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.link-preview__actions button { height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); padding: 0 11px; font-size: 10.5px; }
+.link-preview__actions button:hover:not(:disabled) { background: var(--hover); }
+/* Open sits on the same row, pushed to the far side of Remove/Apply. */
+.link-preview__open { margin-right: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.link-preview__open:hover { color: var(--text); }
+.link-preview__remove:hover { color: var(--danger); }
+.link-preview__apply { font-weight: 600; }
+
+/* The link popover: a URL input with Apply/Remove. */
+.link-menu { position: fixed; z-index: 600; display: flex; align-items: center; gap: 6px; width: 340px; border: 1px solid var(--line); border-radius: 6px; background: var(--page-bg); box-shadow: 0 18px 48px rgba(20,20,18,.20); padding: 7px; animation: home-menu-in .1s ease; }
+:root[data-theme="dark"] .link-menu { box-shadow: 0 18px 48px rgba(0,0,0,.45); }
+.link-menu input { flex: 1; min-width: 0; height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); padding: 0 8px; font-size: 11.5px; outline: none; }
+.link-menu button { height: 26px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); padding: 0 10px; font-size: 10.5px; }
+.link-menu button:hover:not(:disabled) { background: var(--hover); }
+.link-menu__remove:hover:not(:disabled) { color: var(--danger); }
+.link-menu__apply { font-weight: 600; }
+
+.math-editor { position: fixed; z-index: 600; width: 300px; display: flex; flex-direction: column; gap: 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--page-bg); box-shadow: 0 18px 48px rgba(20,20,18,.20); padding: 8px; animation: home-menu-in .1s ease; }
+:root[data-theme="dark"] .math-editor { box-shadow: 0 18px 48px rgba(0,0,0,.45); }
+.math-editor__source { min-height: 52px; resize: vertical; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); padding: 6px 8px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px; line-height: 1.45; outline: none; }
+.math-editor__preview { min-height: 30px; display: flex; align-items: center; justify-content: center; overflow-x: auto; padding: 3px 4px; }
+.math-editor__preview:empty::before { content: "Preview"; color: var(--subtle); font-size: 10.5px; }
+.math-editor__actions { display: flex; align-items: center; gap: 6px; }
+.math-editor__display { display: flex; align-items: center; gap: 5px; margin-right: auto; font-size: 10.5px; color: var(--muted); }
+.math-editor__display input { accent-color: var(--selected); }
+.math-editor__actions button { height: 26px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); padding: 0 11px; font-size: 10.5px; }
+.math-editor__actions button:hover { background: var(--hover); }
+.math-editor__remove:hover { color: var(--danger); }
+.math-editor__done { font-weight: 600; }
 
 .media-frame { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface); }
 .media-frame > img, .media-frame > video { width: 100%; height: 100%; display: block; }
@@ -475,7 +728,11 @@ button:disabled { cursor: default; opacity: .35; }
 .variant-progress { width: 24px; min-height: 20px; display: grid; place-items: center; color: var(--muted); font-size: 8px; font-variant-numeric: tabular-nums; }
 .content-divider { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 
-.page-tool-rail { position: absolute; z-index: 12; width: 32px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--page-bg); box-shadow: var(--shadow); }
+.page-tool-rail { position: absolute; z-index: 12; width: 32px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--page-bg); box-shadow: var(--shadow); opacity: .28; transition: opacity .15s ease; }
+/* The right rail mirrors the left handle's visibility modes exactly (see .page-handle). */
+:root[data-handles="full"] .page-tool-rail { opacity: 1; }
+:root[data-handles="hidden"] .page-tool-rail { opacity: 0; }
+.page-wrapper:hover .page-tool-rail, .page-wrapper .page-tool-rail:focus-within, .page-wrapper.is-selected .page-tool-rail { opacity: 1; }
 .page-tool-rail button, .page-tool-rail label { width: 24px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; border-radius: 5px; padding: 0; color: var(--muted); }
 .page-tool-rail button:hover:not(:disabled), .page-tool-rail button.is-active { background: var(--hover); color: var(--text); }
 .page-tool-rail__rule, .drawing-toolbar__rule { width: 18px; border-top: 1px solid var(--line); margin: 2px 0; }
@@ -490,6 +747,17 @@ button:disabled { cursor: default; opacity: .35; }
 .drawing-width { height: 62px !important; }
 .drawing-toolbar input[type="range"] { width: 54px; height: 16px; transform: rotate(-90deg); accent-color: var(--selected); }
 .drawing-canvas { width: 100%; height: 0; flex: 1 1 0; min-height: 0; display: block; background: var(--page-bg); color: var(--text); touch-action: none; cursor: crosshair; }
+.drawing-brush-cursor { position: fixed; z-index: 10000; width: var(--drawing-cursor-diameter, 3px); height: var(--drawing-cursor-diameter, 3px); color: #1d1d1b; pointer-events: none; opacity: 0; transform: translate(-50%, -50%); }
+.drawing-brush-cursor[data-visible="true"] { opacity: 1; }
+:root[data-theme="dark"] .drawing-brush-cursor { color: #fff; }
+.drawing-brush-cursor__circle { position: absolute; inset: 0; border: 1px solid currentColor; border-radius: 50%; }
+.drawing-brush-cursor__prong { position: absolute; display: block; background: currentColor; border-radius: 1px; }
+.drawing-brush-cursor__prong--top, .drawing-brush-cursor__prong--bottom { left: 50%; width: 1px; height: 5px; transform: translateX(-50%); }
+.drawing-brush-cursor__prong--top { bottom: calc(100% + 2px); }
+.drawing-brush-cursor__prong--bottom { top: calc(100% + 2px); }
+.drawing-brush-cursor__prong--left, .drawing-brush-cursor__prong--right { top: 50%; width: 5px; height: 1px; transform: translateY(-50%); }
+.drawing-brush-cursor__prong--left { right: calc(100% + 2px); }
+.drawing-brush-cursor__prong--right { left: calc(100% + 2px); }
 .page-row.is-resizing, .page-row.is-column-resizing { user-select: none; }
 /* A clicked (not dragged) edge is a selected insertion point: paste and the edge menu
    insert there. The base line sits on the row's bottom edge; the --top variant marks
@@ -539,9 +807,42 @@ button:disabled { cursor: default; opacity: .35; }
 .toast { position: fixed; z-index: 300; bottom: 18px; left: 50%; transform: translateX(-50%); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; background: var(--page-bg); box-shadow: var(--shadow); color: var(--muted); font-size: 11px; }
 
 /* Agent turn lock: while the agent streams into the document the workspace is
-   read-only — tiles take no pointer input and dim slightly so the state reads
-   at a glance. The indicator pill carries the stop affordance. */
-.workspace--agent-locked .page-stack { pointer-events: none; opacity: .82; }
+   read-only. A full-viewport scrim carries the fade and swallows pointer input
+   for everything below z 305 — the toolbar, workspace, scrollbars, toasts —
+   while the Inkjet panel and toggle (310) and the indicator pill with its Stop
+   button (320) stack above it and stay interactive. Wheel events over the
+   scrim still scroll the document (its scroll container is an ancestor), so
+   the user can follow the agent around the page. The page-stack rule below is
+   defense in depth for anything the scrim might miss. */
+.workspace--agent-locked .page-stack { pointer-events: none; }
+.inkjet-lock-scrim {
+  position: fixed; inset: 0; z-index: 305;
+  background: color-mix(in srgb, var(--app-bg) 52%, transparent);
+  animation: inkjet-scrim-in .2s ease both;
+}
+@keyframes inkjet-scrim-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Agent-driven layout changes ease instead of jumping. Scoped to the locked
+   workspace so the user's own drag-resizes stay one-to-one with the pointer. */
+.workspace--agent-locked .page-row { transition: min-height .24s ease; }
+.workspace--agent-locked .page-row__cell { transition: flex-grow .24s ease, flex-shrink .24s ease; }
+
+/* Tiles created after the document opened fade in once, whoever made them —
+   user inserts, paste, redo, or agent ops (PageStack marks them "born"). */
+.page-row__cell--born { animation: tile-born .3s ease both; }
+@keyframes tile-born { from { opacity: 0; } }
+
+/* The indicator's follow toggle: an icon button matching the pill's controls;
+   active state lights up in the accent while the viewport tracks the agent. */
+.inkjet-turn-indicator button.inkjet-turn-indicator__follow { width: 24px; padding: 0; display: grid; place-items: center; color: var(--muted); }
+.inkjet-turn-indicator button.inkjet-turn-indicator__follow.is-active { color: var(--library-accent); border-color: var(--library-accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace--agent-locked .page-row,
+  .workspace--agent-locked .page-row__cell { transition: none; }
+  .inkjet-lock-scrim { animation: none; }
+  .page-row__cell--born { animation: none; }
+}
 .inkjet-turn-indicator {
   position: fixed; z-index: 320; top: 53px; left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px;
@@ -579,9 +880,9 @@ button:disabled { cursor: default; opacity: .35; }
 .inkjet-panel__resize { position: absolute; z-index: 5; left: 0; top: 0; bottom: 0; width: 10px; cursor: ew-resize; display: grid; justify-items: start; align-items: stretch; touch-action: none; }
 .inkjet-panel__resize::after { content: ""; width: 3px; border-radius: 0 3px 3px 0; background: var(--line); opacity: 0; transition: opacity .15s ease, background .15s ease; }
 .inkjet-panel__resize:hover::after, .inkjet-panel__resize:active::after { opacity: 1; background: var(--selected); }
-.inkjet-panel__header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-.inkjet-panel__header strong { flex: 1; font-family: Georgia, "Times New Roman", serif; font-size: 14px; font-style: italic; }
-.inkjet-panel__session { color: var(--subtle); font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
+.inkjet-panel__header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); font-family: Georgia, "Times New Roman", serif; }
+.inkjet-panel__header strong { flex: 1; font-size: 14px; font-style: italic; }
+.inkjet-panel__session { color: var(--subtle); font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
 .inkjet-panel__new { border: 0; background: transparent; color: var(--muted); font-size: 10px; text-decoration: underline; text-underline-offset: 2px; padding: 0; }
 .inkjet-panel__new:hover:not(:disabled) { color: var(--text); }
 
@@ -673,7 +974,10 @@ button:disabled { cursor: default; opacity: .35; }
 .inkjet-panel__composer { display: flex; align-items: flex-end; gap: 7px; padding: 10px 12px; border-top: 1px solid var(--line); }
 /* No resize grip: the field grows with its content (height set from scroll
    height in React, capped) and scrolls invisibly past the cap. */
-.inkjet-panel__composer textarea { flex: 1; min-height: 34px; resize: none; overflow-y: auto; scrollbar-width: none; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 7px 8px; font-size: 11px; line-height: 1.45; outline: none; }
+/* Textareas sit outside the button/input/select font reset, so without this the
+   prompt field renders in the browser's default monospace instead of the
+   transcript's Inter. */
+.inkjet-panel__composer textarea { flex: 1; min-height: 34px; resize: none; overflow-y: auto; scrollbar-width: none; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 7px 8px; font-family: inherit; font-size: 11px; line-height: 1.45; outline: none; }
 .inkjet-panel__composer textarea::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .inkjet-panel__composer textarea:focus { border-color: var(--selected); }
 .inkjet-panel__composer button { height: 28px; border: 1px solid var(--library-accent); border-radius: 5px; background: var(--library-accent); color: var(--library-accent-ink); padding: 0 12px; font-size: 11px; font-weight: 600; }
@@ -699,7 +1003,7 @@ button:disabled { cursor: default; opacity: .35; }
   .library-search { width: 100%; flex: 1 0 100%; }
   .topbar__cluster--right { gap: 0; }
   .zoom-value { display: none; }
-  .page-handle { top: 8px; background: var(--surface); }
+  .page-handle { top: 8px; }
   .page-row { width: calc(100vw - 26px) !important; --inktile-row-width: calc(100vw - 26px) !important; }
   .page-card { width: 100% !important; }
   .page-face { padding-left: 20px !important; padding-right: 20px !important; }

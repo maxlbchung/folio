@@ -1,33 +1,14 @@
 import type { InktileDocument, RuntimeAssetMap } from "../document/types";
 import { uuid } from "../document/factories";
 import { decodeInktile, encodeInktile, type LoadedInktile } from "./inktileArchive";
-import { LIBRARY_INDEX_STORE, LIBRARY_STORE, openInktileDb } from "./database";
+import { getStorage } from "./storage";
+import type { LibraryEntry, LibraryRecordData, StoredLibrarySnapshot } from "./storage/types";
 import { deleteAutosave, readAutosave } from "./autosave";
 
-interface LibraryRecord {
-  id: string;
-  title: string;
-  createdAt: string;
-  modifiedAt: string;
-  lastOpenedAt: string;
-  pageCount: number;
-  plainText: string;
-  previewText: string;
-  path: string | null;
-  pinned?: boolean;
-  blob: Blob;
-  snapshot?: StoredLibrarySnapshot;
-}
-
-interface StoredLibrarySnapshot {
-  document: InktileDocument;
-  assetBlobs: Record<string, Blob>;
-}
+export type { LibraryEntry } from "./storage/types";
 
 export type LibrarySort = "lastOpenedAt" | "createdAt" | "modifiedAt" | "title";
 export type SortDirection = "ascending" | "descending";
-
-export interface LibraryEntry extends Omit<LibraryRecord, "blob" | "snapshot"> {}
 
 export interface LibrarySearchResults {
   titleMatches: LibraryEntry[];
@@ -37,17 +18,6 @@ export interface LibrarySearchResults {
 export interface LoadedLibraryInktile extends LoadedInktile {
   path: string | null;
 }
-
-const requestResult = <T,>(request: IDBRequest<T>): Promise<T> => new Promise((resolve, reject) => {
-  request.onsuccess = () => resolve(request.result);
-  request.onerror = () => reject(request.error);
-});
-
-const completeTransaction = (transaction: IDBTransaction): Promise<void> => new Promise((resolve, reject) => {
-  transaction.oncomplete = () => resolve();
-  transaction.onerror = () => reject(transaction.error);
-  transaction.onabort = () => reject(transaction.error);
-});
 
 const BLOCK_BOUNDARY = /<\/(p|div|li|h[1-6]|blockquote|section|article|ul|ol|pre|tr|td|th|figure|figcaption)>/gi;
 
@@ -78,8 +48,6 @@ export function documentPlainText(document: InktileDocument): string {
 }
 
 const summarize = (text: string): string => text.slice(0, 180).trim();
-
-const toEntry = ({ blob: _blob, snapshot: _snapshot, ...entry }: LibraryRecord): LibraryEntry => entry;
 
 interface CachedLibraryInktile {
   entry: LibraryEntry;
@@ -115,12 +83,11 @@ const rememberEntry = (entry: LibraryEntry) => {
   libraryCache.set(entry.id, { entry, snapshot: cached?.snapshot });
 };
 
-const rememberRecord = (record: LibraryRecord) => {
-  const entry = toEntry(record);
-  const cached = libraryCache.get(record.id);
-  rememberEntry(entry);
-  if (record.snapshot && (!cached || cached.entry.modifiedAt <= entry.modifiedAt)) {
-    libraryCache.get(record.id)!.snapshot = record.snapshot;
+const rememberRecord = (record: LibraryRecordData) => {
+  const cached = libraryCache.get(record.entry.id);
+  rememberEntry(record.entry);
+  if (record.snapshot && (!cached || cached.entry.modifiedAt <= record.entry.modifiedAt)) {
+    libraryCache.get(record.entry.id)!.snapshot = record.snapshot;
   }
 };
 
@@ -142,7 +109,8 @@ const stageLibraryInktile = (
     plainText,
     previewText: summarize(plainText),
     path: path ?? cached?.entry.path ?? null,
-    pinned: cached?.entry.pinned ?? false
+    pinned: cached?.entry.pinned ?? false,
+    tags: cached?.entry.tags ?? []
   };
   const snapshot = createStoredSnapshot(document, assets);
   if (!cached || cached.entry.modifiedAt <= entry.modifiedAt) libraryCache.set(document.id, { entry, snapshot });
@@ -152,15 +120,9 @@ const stageLibraryInktile = (
 export async function listLibraryInktiles(): Promise<LibraryEntry[]> {
   if (!libraryIndexLoaded) {
     libraryIndexLoad ??= (async () => {
-      const database = await openInktileDb();
-      try {
-        const transaction = database.transaction(LIBRARY_INDEX_STORE, "readonly");
-        const entries = await requestResult(transaction.objectStore(LIBRARY_INDEX_STORE).getAll() as IDBRequest<LibraryEntry[]>);
-        entries.forEach(rememberEntry);
-        libraryIndexLoaded = true;
-      } finally {
-        database.close();
-      }
+      const storage = await getStorage();
+      (await storage.listEntries()).forEach(rememberEntry);
+      libraryIndexLoaded = true;
     })().finally(() => { libraryIndexLoad = null; });
     await libraryIndexLoad;
   }
@@ -179,41 +141,33 @@ export async function saveLibraryInktile(
 ): Promise<LibraryEntry> {
   const staged = stageLibraryInktile(document, assets, path, options.touchOpened === true);
   const blob = await encodeInktile(document, assets);
-  const database = await openInktileDb();
-  try {
-    const transaction = database.transaction([LIBRARY_STORE, LIBRARY_INDEX_STORE], "readwrite");
-    const transactionComplete = completeTransaction(transaction);
-    const store = transaction.objectStore(LIBRARY_STORE);
-    const indexStore = transaction.objectStore(LIBRARY_INDEX_STORE);
-    const existing = await requestResult(store.get(document.id) as IDBRequest<LibraryRecord | undefined>);
-    if (existing && existing.modifiedAt > document.modifiedAt) {
-      if (options.touchOpened) {
-        existing.lastOpenedAt = new Date().toISOString();
-        if (path) existing.path = path;
-        store.put(existing);
-        indexStore.put(toEntry(existing));
+  const storage = await getStorage();
+  const existing = await storage.getEntry(document.id);
+  if (existing && existing.modifiedAt > document.modifiedAt) {
+    // The stored inktile is newer than this save (e.g. a stale editor flush): keep it,
+    // at most stamping the open time and a learned path.
+    if (options.touchOpened) {
+      const patch: Partial<LibraryEntry> = { lastOpenedAt: new Date().toISOString() };
+      if (path) patch.path = path;
+      const updated = await storage.patchEntry(document.id, patch);
+      if (updated) {
+        rememberEntry(updated);
+        return updated;
       }
-      await transactionComplete;
-      rememberRecord(existing);
-      return toEntry(existing);
     }
-    // A save staged before the library index warmed the cache must not drop an existing pin.
-    if (existing?.pinned && !staged.entry.pinned) staged.entry.pinned = true;
-    const record: LibraryRecord = {
-      ...staged.entry,
-      lastOpenedAt: staged.entry.lastOpenedAt,
-      path: path ?? existing?.path ?? staged.entry.path,
-      blob,
-      snapshot: staged.snapshot
-    };
-    store.put(record);
-    indexStore.put(toEntry(record));
-    await transactionComplete;
-    rememberRecord(record);
-    return toEntry(record);
-  } finally {
-    database.close();
+    rememberEntry(existing);
+    return existing;
   }
+  // A save staged before the library index warmed the cache must not drop an existing pin or tags.
+  if (existing?.pinned && !staged.entry.pinned) staged.entry.pinned = true;
+  if (existing?.tags?.length && !staged.entry.tags?.length) staged.entry.tags = existing.tags;
+  const entry: LibraryEntry = {
+    ...staged.entry,
+    path: path ?? existing?.path ?? staged.entry.path
+  };
+  await storage.putRecord({ entry, blob, snapshot: staged.snapshot });
+  rememberRecord({ entry, blob, snapshot: staged.snapshot });
+  return entry;
 }
 
 export function getCachedLibraryInktile(id: string): LoadedLibraryInktile | null {
@@ -223,101 +177,58 @@ export function getCachedLibraryInktile(id: string): LoadedLibraryInktile | null
 }
 
 export async function touchLibraryInktile(id: string): Promise<void> {
-  const database = await openInktileDb();
-  try {
-    const transaction = database.transaction(LIBRARY_INDEX_STORE, "readwrite");
-    const transactionComplete = completeTransaction(transaction);
-    const store = transaction.objectStore(LIBRARY_INDEX_STORE);
-    const entry = await requestResult(store.get(id) as IDBRequest<LibraryEntry | undefined>);
-    if (entry) {
-      entry.lastOpenedAt = new Date().toISOString();
-      store.put(entry);
-      await transactionComplete;
-      rememberEntry(entry);
-    } else {
-      await transactionComplete;
-    }
-  } finally {
-    database.close();
-  }
+  const storage = await getStorage();
+  const updated = await storage.patchEntry(id, { lastOpenedAt: new Date().toISOString() });
+  if (updated) rememberEntry(updated);
 }
 
 export async function setLibraryInktilePinned(id: string, pinned: boolean): Promise<void> {
   const cached = libraryCache.get(id);
   if (cached) cached.entry.pinned = pinned;
-  const database = await openInktileDb();
-  try {
-    const transaction = database.transaction([LIBRARY_STORE, LIBRARY_INDEX_STORE], "readwrite");
-    const transactionComplete = completeTransaction(transaction);
-    const store = transaction.objectStore(LIBRARY_STORE);
-    const indexStore = transaction.objectStore(LIBRARY_INDEX_STORE);
-    const record = await requestResult(store.get(id) as IDBRequest<LibraryRecord | undefined>);
-    if (record) {
-      record.pinned = pinned;
-      store.put(record);
-    }
-    const entry = await requestResult(indexStore.get(id) as IDBRequest<LibraryEntry | undefined>);
-    if (entry) {
-      entry.pinned = pinned;
-      indexStore.put(entry);
-    }
-    await transactionComplete;
-  } finally {
-    database.close();
-  }
+  const storage = await getStorage();
+  await storage.patchEntry(id, { pinned });
 }
 
-const persistStoredSnapshot = async (id: string, modifiedAt: string, snapshot: StoredLibrarySnapshot): Promise<void> => {
-  const database = await openInktileDb();
-  try {
-    const transaction = database.transaction(LIBRARY_STORE, "readwrite");
-    const transactionComplete = completeTransaction(transaction);
-    const store = transaction.objectStore(LIBRARY_STORE);
-    const current = await requestResult(store.get(id) as IDBRequest<LibraryRecord | undefined>);
-    if (current?.modifiedAt === modifiedAt) {
-      current.snapshot = snapshot;
-      store.put(current);
-    }
-    await transactionComplete;
-  } finally {
-    database.close();
+export async function setLibraryInktileTags(id: string, tags: string[]): Promise<void> {
+  const cached = libraryCache.get(id);
+  if (cached) cached.entry.tags = tags;
+  const storage = await getStorage();
+  await storage.patchEntry(id, { tags });
+}
+
+/** Strip a deleted tag's id from every stored record and the in-memory cache. */
+export async function removeTagFromAllLibraryInktiles(tagId: string): Promise<void> {
+  for (const cached of libraryCache.values()) {
+    if (cached.entry.tags?.includes(tagId)) cached.entry.tags = cached.entry.tags.filter((id) => id !== tagId);
   }
-};
+  const storage = await getStorage();
+  for (const entry of await storage.listEntries()) {
+    if (entry.tags?.includes(tagId)) {
+      await storage.patchEntry(entry.id, { tags: entry.tags.filter((id) => id !== tagId) });
+    }
+  }
+}
 
 export async function openLibraryInktile(id: string): Promise<LoadedLibraryInktile | null> {
   const cached = getCachedLibraryInktile(id);
   if (cached) return cached;
-  const database = await openInktileDb();
-  try {
-    const transaction = database.transaction(LIBRARY_STORE, "readonly");
-    const store = transaction.objectStore(LIBRARY_STORE);
-    const record = await requestResult(store.get(id) as IDBRequest<LibraryRecord | undefined>);
-    if (!record) return null;
-    rememberRecord(record);
-    if (record.snapshot) return { ...loadStoredSnapshot(record.snapshot), path: record.path };
+  const storage = await getStorage();
+  const record = await storage.getRecord(id);
+  if (!record) return null;
+  rememberRecord(record);
+  if (record.snapshot) return { ...loadStoredSnapshot(record.snapshot), path: record.entry.path };
 
-    const loaded = await decodeInktile(record.blob);
-    const snapshot = createStoredSnapshot(loaded.document, loaded.assets);
-    libraryCache.set(id, { entry: toEntry(record), snapshot });
-    void persistStoredSnapshot(id, record.modifiedAt, snapshot).catch(() => undefined);
-    return { ...loaded, path: record.path };
-  } finally {
-    database.close();
-  }
+  const loaded = await decodeInktile(record.blob);
+  const snapshot = createStoredSnapshot(loaded.document, loaded.assets);
+  libraryCache.set(id, { entry: record.entry, snapshot });
+  void storage.putSnapshot(id, record.entry.modifiedAt, snapshot).catch(() => undefined);
+  return { ...loaded, path: record.entry.path };
 }
 
 export async function deleteLibraryInktile(id: string): Promise<void> {
   libraryCache.delete(id);
-  const database = await openInktileDb();
-  try {
-    const transaction = database.transaction([LIBRARY_STORE, LIBRARY_INDEX_STORE], "readwrite");
-    const transactionComplete = completeTransaction(transaction);
-    transaction.objectStore(LIBRARY_STORE).delete(id);
-    transaction.objectStore(LIBRARY_INDEX_STORE).delete(id);
-    await transactionComplete;
-  } finally {
-    database.close();
-  }
+  const storage = await getStorage();
+  await storage.deleteRecord(id);
 
   const autosave = await readAutosave().catch(() => null);
   if (!autosave) return;
@@ -328,44 +239,35 @@ export async function deleteLibraryInktile(id: string): Promise<void> {
   }
 }
 
+/** Load a record's document for derived edits (rename, duplicate), snapshot-first. */
+async function loadRecordDocument(record: LibraryRecordData): Promise<LoadedLibraryInktile> {
+  return getCachedLibraryInktile(record.entry.id)
+    ?? (record.snapshot ? { ...loadStoredSnapshot(record.snapshot), path: record.entry.path } : null)
+    ?? { ...(await decodeInktile(record.blob)), path: record.entry.path };
+}
+
 export async function renameLibraryInktile(id: string, title: string): Promise<LibraryEntry | null> {
   const nextTitle = title.trim() || "Untitled Inktile";
-  const database = await openInktileDb();
-  let record: LibraryRecord | undefined;
-  try {
-    const transaction = database.transaction(LIBRARY_STORE, "readonly");
-    record = await requestResult(transaction.objectStore(LIBRARY_STORE).get(id) as IDBRequest<LibraryRecord | undefined>);
-  } finally {
-    database.close();
-  }
+  const storage = await getStorage();
+  const record = await storage.getRecord(id);
   if (!record) return null;
 
-  const loaded = getCachedLibraryInktile(id)
-    ?? (record.snapshot ? { ...loadStoredSnapshot(record.snapshot), path: record.path } : null)
-    ?? { ...(await decodeInktile(record.blob)), path: record.path };
+  const loaded = await loadRecordDocument(record);
   loaded.document.title = nextTitle;
   loaded.document.modifiedAt = new Date().toISOString();
   try {
-    return await saveLibraryInktile(loaded.document, loaded.assets, record.path);
+    return await saveLibraryInktile(loaded.document, loaded.assets, record.entry.path);
   } finally {
     Object.values(loaded.assets).forEach((asset) => URL.revokeObjectURL(asset.url));
   }
 }
 
 export async function duplicateLibraryInktile(id: string): Promise<LibraryEntry | null> {
-  const database = await openInktileDb();
-  let record: LibraryRecord | undefined;
-  try {
-    const transaction = database.transaction(LIBRARY_STORE, "readonly");
-    record = await requestResult(transaction.objectStore(LIBRARY_STORE).get(id) as IDBRequest<LibraryRecord | undefined>);
-  } finally {
-    database.close();
-  }
+  const storage = await getStorage();
+  const record = await storage.getRecord(id);
   if (!record) return null;
 
-  const loaded = getCachedLibraryInktile(id)
-    ?? (record.snapshot ? { ...loadStoredSnapshot(record.snapshot), path: record.path } : null)
-    ?? { ...(await decodeInktile(record.blob)), path: record.path };
+  const loaded = await loadRecordDocument(record);
   const now = new Date().toISOString();
   const duplicate: InktileDocument = {
     ...structuredClone(loaded.document),

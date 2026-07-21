@@ -3,7 +3,6 @@ dist
 dist-smoke
 dist-smoke-current
 agent/.codex-workspace
-agent/.opencode-workspace
 src-tauri/target
 .DS_Store
 *.inktile

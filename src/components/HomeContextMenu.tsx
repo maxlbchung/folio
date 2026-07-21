@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { LibraryEntry } from "../persistence/library";
-import { DuplicateIcon, EditIcon, FileIcon, FolderIcon, PinIcon, PlusIcon, SettingsIcon, TrashIcon, UnpinIcon } from "./icons";
+import type { InktileTag } from "../persistence/tags";
+import { ChevronDown, ChevronUp, CloseIcon, DuplicateIcon, EditIcon, FileIcon, FolderIcon, PinIcon, PlusIcon, SettingsIcon, TagIcon, TrashIcon, UnpinIcon } from "./icons";
 
 /** Where the menu was summoned and, when a card was hit, which inktile it belongs to. */
 export interface HomeMenuState {
@@ -12,6 +13,7 @@ export interface HomeMenuState {
 
 interface HomeContextMenuProps {
   state: HomeMenuState;
+  tags: InktileTag[];
   onClose: () => void;
   onCreate: () => void;
   onImport: () => void;
@@ -21,6 +23,9 @@ interface HomeContextMenuProps {
   onTogglePinEntry: (entry: LibraryEntry) => void;
   onDuplicateEntry: (entry: LibraryEntry) => void;
   onDeleteEntry: (entry: LibraryEntry) => void;
+  /** Apply or remove one tag; the menu stays open so several tags can be changed in a row. */
+  onToggleEntryTag: (entry: LibraryEntry, tag: InktileTag, apply: boolean) => void;
+  onCreateTagForEntry: (entry: LibraryEntry) => void;
 }
 
 /** Keep the menu this many pixels clear of the viewport edges when it would overflow. */
@@ -40,13 +45,21 @@ const countWords = (text: string): number => {
 const formatCount = (value: number): string => value.toLocaleString();
 
 export function HomeContextMenu({
-  state, onClose, onCreate, onImport, onOpenSettings,
-  onOpenEntry, onRenameEntry, onTogglePinEntry, onDuplicateEntry, onDeleteEntry
+  state, tags, onClose, onCreate, onImport, onOpenSettings,
+  onOpenEntry, onRenameEntry, onTogglePinEntry, onDuplicateEntry, onDeleteEntry,
+  onToggleEntryTag, onCreateTagForEntry
 }: HomeContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: state.x, top: state.y });
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
+
+  const appliedTags = state.entry
+    ? (state.entry.tags ?? []).map((id) => tags.find((tag) => tag.id === id)).filter((tag): tag is InktileTag => Boolean(tag))
+    : [];
+  const availableTags = state.entry ? tags.filter((tag) => !(state.entry!.tags ?? []).includes(tag.id)) : [];
 
   // Clamp to the viewport once the menu has a measured size, so it never spills off-screen.
+  // Tag toggles and the tag picker change the menu's height, so they re-run the clamp.
   useLayoutEffect(() => {
     const menu = menuRef.current;
     if (!menu) return;
@@ -56,7 +69,7 @@ export function HomeContextMenu({
       left: Math.max(MENU_MARGIN, Math.min(state.x, maxLeft)),
       top: Math.max(MENU_MARGIN, Math.min(state.y, maxTop))
     });
-  }, [state.x, state.y, state.entry]);
+  }, [state.x, state.y, state.entry, tagPickerOpen, appliedTags.length]);
 
   // Dismiss on outside pointer, Escape, scroll, or resize.
   useEffect(() => {
@@ -125,6 +138,46 @@ export function HomeContextMenu({
           <button className="home-menu__item" role="menuitem" onClick={run(() => onDuplicateEntry(entry))}>
             <DuplicateIcon size={15} />Duplicate
           </button>
+          <div className="home-menu__sep" role="separator" />
+          <div className="home-menu__tags">
+            <p className="home-menu__eyebrow">Tags</p>
+            {appliedTags.map((tag) => (
+              <div key={tag.id} className="home-menu__tag-row">
+                <span className="home-menu__tag-dot" style={{ background: tag.color }} aria-hidden="true" />
+                <span className="home-menu__tag-name" title={tag.name}>{tag.name}</span>
+                <button
+                  className="home-menu__tag-remove"
+                  onClick={() => onToggleEntryTag(entry, tag, false)}
+                  title={`Remove tag “${tag.name}”`}
+                  aria-label={`Remove tag ${tag.name}`}
+                ><CloseIcon size={11} /></button>
+              </div>
+            ))}
+            {!appliedTags.length && <p className="home-menu__tag-empty">No tags yet</p>}
+            <button
+              className="home-menu__item"
+              role="menuitem"
+              aria-expanded={tagPickerOpen}
+              onClick={() => setTagPickerOpen((open) => !open)}
+            >
+              <TagIcon size={15} />Add tag
+              <span className="home-menu__item-caret">{tagPickerOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</span>
+            </button>
+            {tagPickerOpen && (
+              <div className="home-menu__tag-picker">
+                {availableTags.map((tag) => (
+                  <button key={tag.id} className="home-menu__tag-option" onClick={() => onToggleEntryTag(entry, tag, true)}>
+                    <span className="home-menu__tag-dot" style={{ background: tag.color }} aria-hidden="true" />
+                    <span className="home-menu__tag-name" title={tag.name}>{tag.name}</span>
+                  </button>
+                ))}
+                {!availableTags.length && tags.length > 0 && <p className="home-menu__tag-empty">All tags applied</p>}
+                <button className="home-menu__tag-option home-menu__tag-option--new" onClick={run(() => onCreateTagForEntry(entry))}>
+                  <PlusIcon size={13} />New tag…
+                </button>
+              </div>
+            )}
+          </div>
           <div className="home-menu__sep" role="separator" />
           <button className="home-menu__item home-menu__item--danger" role="menuitem" onClick={run(() => onDeleteEntry(entry))}>
             <TrashIcon size={15} />Delete

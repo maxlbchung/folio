@@ -43,14 +43,17 @@ function safeFilename(title: string): string {
 
 /**
  * Write bytes to a temp sibling and rename it over the target so a crash mid-write can
- * never leave a truncated archive at `path` (std rename replaces existing files on both
- * Windows and Unix).
+ * never leave a truncated archive at `path` (missing parent directories are created).
+ * Done by the native save_file_atomic command, not the fs plugin: the plugin's scope only
+ * ever covers the exact dialog-picked path, so it rejects the `.tmp` sibling as a
+ * forbidden path. The path travels percent-encoded in a header because raw-payload
+ * invokes carry all other arguments as ASCII header values. Native (Tauri) shells only.
  */
-async function writeNativeFileAtomic(path: string, bytes: Uint8Array): Promise<void> {
-  const { writeFile, rename } = await import("@tauri-apps/plugin-fs");
-  const tmpPath = `${path}.tmp`;
-  await writeFile(tmpPath, bytes, { append: false, create: true, createNew: false });
-  await rename(tmpPath, path);
+export async function saveNativeFileAtomic(path: string, bytes: Uint8Array): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("save_file_atomic", bytes, {
+    headers: { "x-inktile-path": encodeURIComponent(path) }
+  });
 }
 
 /** Overwrite a known native path with the current document. Native (Tauri) shells only. */
@@ -60,7 +63,7 @@ export async function overwriteDocumentPath(
   path: string
 ): Promise<void> {
   const blob = await encodeInktile(document, assets);
-  await writeNativeFileAtomic(path, new Uint8Array(await blob.arrayBuffer()));
+  await saveNativeFileAtomic(path, new Uint8Array(await blob.arrayBuffer()));
 }
 
 export async function saveDocumentFile(
@@ -84,7 +87,7 @@ export async function saveDocumentFile(
       filters: [{ name: "Inktile document", extensions: ["inktile"] }]
     });
     if (!path) return { path: existingPath, cancelled: true, wroteFile: false };
-    await writeNativeFileAtomic(path, new Uint8Array(await blob.arrayBuffer()));
+    await saveNativeFileAtomic(path, new Uint8Array(await blob.arrayBuffer()));
     return { path, cancelled: false, wroteFile: true };
   }
 

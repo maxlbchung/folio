@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useDocument } from "../document/DocumentContext";
-import { createVariantBlock, uuid } from "../document/factories";
+import { createMediaBlock, createVariantBlock } from "../document/factories";
 import { detectMediaPageType } from "../document/mediaTypes";
 import { PlusIcon } from "./icons";
 
@@ -28,9 +28,7 @@ export function PageInsertControl({ afterPageId }: Props) {
     }
     try {
       const assetId = await addAsset(file);
-      if (type === "image") addBlockPage({ id: uuid(), type, assetId, height: 420, fit: "contain", alt: file.name }, afterPageId);
-      if (type === "video") addBlockPage({ id: uuid(), type, assetId, height: 420, fit: "contain", controls: true }, afterPageId);
-      if (type === "audio") addBlockPage({ id: uuid(), type, assetId, size: "compact" }, afterPageId);
+      addBlockPage(createMediaBlock(type, assetId, file.name), afterPageId);
       setOpen(false);
     } catch (error) {
       setMediaError(error instanceof Error ? error.message : "The media file could not be added.");

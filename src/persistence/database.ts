@@ -1,8 +1,20 @@
 export const INKTILE_DB_NAME = "inktile-editor";
-export const INKTILE_DB_VERSION = 3;
+export const INKTILE_DB_VERSION = 4;
 export const AUTOSAVE_STORE = "autosave";
 export const LIBRARY_STORE = "library";
 export const LIBRARY_INDEX_STORE = "library-index";
+export const TAGS_STORE = "tags";
+
+export const requestResult = <T,>(request: IDBRequest<T>): Promise<T> => new Promise((resolve, reject) => {
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(request.error);
+});
+
+export const completeTransaction = (transaction: IDBTransaction): Promise<void> => new Promise((resolve, reject) => {
+  transaction.oncomplete = () => resolve();
+  transaction.onerror = () => reject(transaction.error);
+  transaction.onabort = () => reject(transaction.error);
+});
 
 export function openInktileDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -11,6 +23,7 @@ export function openInktileDb(): Promise<IDBDatabase> {
       const database = request.result;
       if (!database.objectStoreNames.contains(AUTOSAVE_STORE)) database.createObjectStore(AUTOSAVE_STORE);
       if (!database.objectStoreNames.contains(LIBRARY_STORE)) database.createObjectStore(LIBRARY_STORE, { keyPath: "id" });
+      if (!database.objectStoreNames.contains(TAGS_STORE)) database.createObjectStore(TAGS_STORE, { keyPath: "id" });
       const indexStore = database.objectStoreNames.contains(LIBRARY_INDEX_STORE)
         ? request.transaction!.objectStore(LIBRARY_INDEX_STORE)
         : database.createObjectStore(LIBRARY_INDEX_STORE, { keyPath: "id" });

@@ -44,11 +44,15 @@ export interface DocumentContextValue {
   loadDocument: (loaded: LoadedDocument) => void;
   updateTitle: (title: string) => void;
   setPageVerticalAlign: (pageId: string, alignment: VerticalAlignment) => void;
+  /** Sets the vertical anchor on several pages as one undo step. */
+  setPagesVerticalAlign: (pageIds: string[], alignment: VerticalAlignment) => void;
   addPage: (afterPageId?: string, type?: PageType) => string;
   /** Inserts a new page at an exact spot: before row `rowIndex`, or into that row
    * before column `columnIndex` (null when the row is full). */
   addPageAt: (position: InsertPosition, type?: PageType) => string | null;
   addBlockPage: (block: Block, afterPageId?: string) => string;
+  /** addPageAt for component pages (versions, media); null when the target row is full. */
+  addBlockPageAt: (block: Block, position: InsertPosition) => string | null;
   duplicatePage: (pageId: string) => string | null;
   duplicatePages: (pageIds: string[]) => string[];
   pastePages: (sources: InktilePage[], afterPageId?: string) => string[];
@@ -112,6 +116,24 @@ export function DocumentProvider({ children }: PropsWithChildren) {
   const revisionRef = useRef(0);
   const documentRef = useRef(document);
   documentRef.current = document;
+  // History stacks mirrored into refs so commit/undo/redo can compute their next states
+  // eagerly and pass plain VALUES to setState. Nested setState calls inside updater
+  // functions are impure — StrictMode double-invokes updaters, so those side effects fire
+  // twice and silently corrupt the stacks (duplicate history entries, redo restoring the
+  // wrong snapshot). The refs are also mutated in place by those callbacks so same-tick
+  // sequences (e.g. flushSync-driven agent ops) read coherent state before the re-render.
+  const pastRef = useRef<InktileDocument[]>(past);
+  pastRef.current = past;
+  const futureRef = useRef<InktileDocument[]>(future);
+  futureRef.current = future;
+  // Checkpoint base: the document as of the last committed render — deliberately NOT the
+  // eagerly-mutated documentRef. One user gesture (a multi-tile format, a toolbar insert)
+  // can commit several times and fire several checkpoints within one synchronous tick
+  // (execCommand raises native input events mid-loop); snapshotting the rendered document
+  // makes every one of them capture the same pre-gesture state, and the identity dedupe
+  // below collapses them into a single undo step instead of half-applied intermediates.
+  const renderedDocumentRef = useRef(document);
+  renderedDocumentRef.current = document;
 
   const commit = useCallback((updater: (draft: InktileDocument) => void, record = true) => {
     // Turn-based lock: while an agent turn runs, only agent-issued mutations
@@ -120,16 +142,18 @@ export function DocumentProvider({ children }: PropsWithChildren) {
     if (agentTurnRef.current && !agentWritingRef.current) return;
     if (agentWritingRef.current) record = false;
     revisionRef.current += 1;
-    setDocument((previous) => {
-      const next = structuredClone(previous);
-      updater(next);
-      next.modifiedAt = new Date().toISOString();
-      if (record) {
-        setPast((items) => [...items, previous].slice(-100));
-        setFuture([]);
-      }
-      return next;
-    });
+    const previous = documentRef.current;
+    const next = structuredClone(previous);
+    updater(next);
+    next.modifiedAt = new Date().toISOString();
+    if (record) {
+      pastRef.current = [...pastRef.current, previous].slice(-100);
+      futureRef.current = [];
+      setPast(pastRef.current);
+      setFuture([]);
+    }
+    documentRef.current = next;
+    setDocument(next);
     setDirty(true);
   }, []);
 
@@ -138,6 +162,9 @@ export function DocumentProvider({ children }: PropsWithChildren) {
     revokeAssets(assets);
     setAssets({});
     revisionRef.current += 1;
+    documentRef.current = nextDocument;
+    pastRef.current = [];
+    futureRef.current = [];
     setDocument(nextDocument);
     setPast([]);
     setFuture([]);
@@ -152,7 +179,11 @@ export function DocumentProvider({ children }: PropsWithChildren) {
       return loaded.assets;
     });
     revisionRef.current += 1;
-    setDocument(normalizeDocumentPages(loaded.document));
+    const normalized = normalizeDocumentPages(loaded.document);
+    documentRef.current = normalized;
+    pastRef.current = [];
+    futureRef.current = [];
+    setDocument(normalized);
     setPast([]);
     setFuture([]);
     setDirty(false);
@@ -163,12 +194,18 @@ export function DocumentProvider({ children }: PropsWithChildren) {
     commit((draft) => { draft.title = title; }, false);
   }, [commit]);
 
-  const setPageVerticalAlign = useCallback((pageId: string, alignment: VerticalAlignment) => {
+  const setPagesVerticalAlign = useCallback((pageIds: string[], alignment: VerticalAlignment) => {
     commit((draft) => {
-      const page = draft.pages[pageId];
-      if (page) page.verticalAlign = alignment;
+      pageIds.forEach((pageId) => {
+        const page = draft.pages[pageId];
+        if (page) page.verticalAlign = alignment;
+      });
     });
   }, [commit]);
+
+  const setPageVerticalAlign = useCallback((pageId: string, alignment: VerticalAlignment) => {
+    setPagesVerticalAlign([pageId], alignment);
+  }, [setPagesVerticalAlign]);
 
   const addPage = useCallback((afterPageId?: string, type: PageType = "standard") => {
     const page = createPage(type);
@@ -209,6 +246,31 @@ export function DocumentProvider({ children }: PropsWithChildren) {
       draft.pages[page.id] = page;
       const rowIndex = afterPageId ? draft.pageRows.findIndex((row) => row.includes(afterPageId)) : -1;
       draft.pageRows.splice(rowIndex >= 0 ? rowIndex + 1 : draft.pageRows.length, 0, [page.id]);
+      syncPageOrder(draft);
+    });
+    return page.id;
+  }, [commit]);
+
+  /** addPageAt for component pages (versions, media): inserts the block's page at an
+   * exact spot — before row `rowIndex`, or into that row before `columnIndex` (null
+   * when the row is already full). */
+  const addBlockPageAt = useCallback((block: Block, position: InsertPosition) => {
+    const { rowIndex, columnIndex } = position;
+    if (columnIndex !== undefined) {
+      const row = documentRef.current.pageRows[rowIndex];
+      if (!row || row.length >= 4) return null;
+    }
+    const page = createBlockPage(block);
+    commit((draft) => {
+      draft.pages[page.id] = page;
+      const row = columnIndex !== undefined ? draft.pageRows[rowIndex] : undefined;
+      if (row) {
+        row.splice(Math.min(columnIndex ?? row.length, row.length), 0, page.id);
+        // Membership changed, so the row's width split resets to the equal default.
+        row.forEach((id) => { const member = draft.pages[id]; if (member) delete member.layoutWidthFraction; });
+      } else {
+        draft.pageRows.splice(Math.max(0, Math.min(rowIndex, draft.pageRows.length)), 0, [page.id]);
+      }
       syncPageOrder(draft);
     });
     return page.id;
@@ -415,15 +477,28 @@ export function DocumentProvider({ children }: PropsWithChildren) {
     }, record);
   }, [commit]);
 
+  // The document object a checkpoint was last recorded for. Commits replace the document
+  // object, so identity equality means "nothing changed since that checkpoint" — a second
+  // snapshot would only add a no-op undo step. This lets discrete actions (checkbox
+  // toggles, table edits, math saves) checkpoint defensively while the tile views'
+  // once-per-focus-session checkpoint stays harmless when both fire for one gesture.
+  const lastCheckpointRef = useRef<InktileDocument | null>(null);
+
   const checkpoint = useCallback(() => {
     if (agentTurnRef.current && !agentWritingRef.current) return;
-    setPast((items) => [...items, structuredClone(documentRef.current)].slice(-100));
+    if (lastCheckpointRef.current === renderedDocumentRef.current) return;
+    lastCheckpointRef.current = renderedDocumentRef.current;
+    pastRef.current = [...pastRef.current, structuredClone(renderedDocumentRef.current)].slice(-100);
+    futureRef.current = [];
+    setPast(pastRef.current);
     setFuture([]);
   }, []);
 
   const beginAgentTurn = useCallback(() => {
     if (agentTurnRef.current) return false;
-    setPast((items) => [...items, structuredClone(documentRef.current)].slice(-100));
+    pastRef.current = [...pastRef.current, structuredClone(documentRef.current)].slice(-100);
+    futureRef.current = [];
+    setPast(pastRef.current);
     setFuture([]);
     agentTurnRef.current = true;
     setAgentTurn(true);
@@ -471,34 +546,47 @@ export function DocumentProvider({ children }: PropsWithChildren) {
     return id;
   }, [commit]);
 
+  /**
+   * Restoring history must be visible immediately, but the tile views deliberately skip
+   * rewriting a focused editable (the guard that protects the caret during typing). So
+   * undo/redo release rich-text focus first; the blur commits any pending live content
+   * (record=false) before the restore, and the now-unfocused tile repaints from the
+   * restored HTML. Without this, undoing while the caret sits in the edited tile changes
+   * document state invisibly — and the next keystroke re-commits the stale DOM.
+   */
+  const releaseEditingFocus = () => {
+    const active = window.document.activeElement;
+    if (active instanceof HTMLElement && active.closest(".text-block, .variant-editor")) active.blur();
+  };
+
   const undo = useCallback(() => {
-    if (agentTurnRef.current) return;
+    if (agentTurnRef.current || !pastRef.current.length) return;
+    // Blur first: the tile's blur commit (content-identical — every input already
+    // committed) lands before the restore below overwrites the document.
+    releaseEditingFocus();
     revisionRef.current += 1;
-    setPast((items) => {
-      if (!items.length) return items;
-      const previous = items[items.length - 1];
-      setDocument((current) => {
-        setFuture((futureItems) => [current, ...futureItems].slice(0, 100));
-        return previous;
-      });
-      setDirty(true);
-      return items.slice(0, -1);
-    });
+    const restored = pastRef.current[pastRef.current.length - 1];
+    pastRef.current = pastRef.current.slice(0, -1);
+    futureRef.current = [documentRef.current, ...futureRef.current].slice(0, 100);
+    documentRef.current = restored;
+    setPast(pastRef.current);
+    setFuture(futureRef.current);
+    setDocument(restored);
+    setDirty(true);
   }, []);
 
   const redo = useCallback(() => {
-    if (agentTurnRef.current) return;
+    if (agentTurnRef.current || !futureRef.current.length) return;
+    releaseEditingFocus();
     revisionRef.current += 1;
-    setFuture((items) => {
-      if (!items.length) return items;
-      const next = items[0];
-      setDocument((current) => {
-        setPast((pastItems) => [...pastItems, current].slice(-100));
-        return next;
-      });
-      setDirty(true);
-      return items.slice(1);
-    });
+    const restored = futureRef.current[0];
+    futureRef.current = futureRef.current.slice(1);
+    pastRef.current = [...pastRef.current, documentRef.current].slice(-100);
+    documentRef.current = restored;
+    setPast(pastRef.current);
+    setFuture(futureRef.current);
+    setDocument(restored);
+    setDirty(true);
   }, []);
 
   const value = useMemo<DocumentContextValue>(() => ({
@@ -512,9 +600,11 @@ export function DocumentProvider({ children }: PropsWithChildren) {
     loadDocument,
     updateTitle,
     setPageVerticalAlign,
+    setPagesVerticalAlign,
     addPage,
     addPageAt,
     addBlockPage,
+    addBlockPageAt,
     duplicatePage,
     duplicatePages,
     pastePages,
@@ -544,8 +634,8 @@ export function DocumentProvider({ children }: PropsWithChildren) {
     getRevision,
     getDocumentSnapshot
   }), [
-    document, assets, dirty, currentPath, newDocument, loadDocument, updateTitle, setPageVerticalAlign,
-    addPage, addPageAt, addBlockPage, duplicatePage, duplicatePages, pastePages, pastePagesAt, deletePage, deletePages, movePage, movePages,
+    document, assets, dirty, currentPath, newDocument, loadDocument, updateTitle, setPageVerticalAlign, setPagesVerticalAlign,
+    addPage, addPageAt, addBlockPage, addBlockPageAt, duplicatePage, duplicatePages, pastePages, pastePagesAt, deletePage, deletePages, movePage, movePages,
     setPageRowHeight, setRowWidthFractions, togglePageSide, togglePagesSide, convertVariantToText, setPageNotes, updatePageDrawing, updateBlock,
     addAsset, checkpoint, undo, redo, past.length, future.length,
     agentTurn, beginAgentTurn, endAgentTurn, runAgentEdit, getRevision, getDocumentSnapshot

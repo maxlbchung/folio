@@ -17,6 +17,14 @@ const smokeServer = createServer((request, response) => {
     response.end('<!doctype html><html><body></body></html>');
     return;
   }
+  if (request.url === '/framed-deny') {
+    // Refuses embedding like most large sites do — exercises the link popup's
+    // no-preview path (Chromium renders its error page in the frame instead).
+    response.setHeader('Content-Type', 'text/html; charset=utf-8');
+    response.setHeader('X-Frame-Options', 'DENY');
+    response.end('<!doctype html><html><body>no framing</body></html>');
+    return;
+  }
   if (request.url === '/app.js') {
     response.setHeader('Content-Type', 'text/javascript; charset=utf-8');
     response.end(script);
@@ -27,7 +35,7 @@ const smokeServer = createServer((request, response) => {
     response.end(styles);
     return;
   }
-  if (request.url === '/inktile-logo.png') {
+  if (request.url === '/inktile-logo.png' || request.url === '/favicon.ico') {
     response.setHeader('Content-Type', 'image/png');
     response.end(logo);
     return;
@@ -121,6 +129,10 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Create your first inktile' }).count(), 1, 'the empty home page offers a create action');
   assert.equal(await page.getByRole('button', { name: /^Open .inktile/ }).count(), 1, 'home page offers an existing inktile import action');
   assert.equal(await page.getByRole('button', { name: 'Settings' }).count(), 1, 'home page offers application settings');
+  assert.ok(
+    (await page.locator('html').evaluate((root) => getComputedStyle(root).getPropertyValue('--cursor-default'))).includes('%231d1d1b'),
+    'light mode uses the black custom cursor family'
+  );
   assert.equal(
     await page.locator('html').evaluate((root) => getComputedStyle(root).scrollbarWidth),
     'none',
@@ -132,6 +144,10 @@ try {
   await settingsDialog.getByRole('radio', { name: 'Dark' }).check();
   await settingsDialog.getByLabel('UI scale').selectOption('1.1');
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark', 'home settings apply the selected theme');
+  assert.ok(
+    (await page.locator('html').evaluate((root) => getComputedStyle(root).getPropertyValue('--cursor-default'))).includes('%23fff'),
+    'dark mode uses the white custom cursor family'
+  );
   assert.equal(await page.locator('html').evaluate((root) => root.style.getPropertyValue('--ui-scale')), '1.1', 'home settings apply the selected UI scale');
   const scaledLayout = await page.evaluate(() => {
     const shell = document.querySelector('.app-shell').getBoundingClientRect();
@@ -265,7 +281,7 @@ try {
   const formattingBox = await page.locator('.text-toolbar').boundingBox();
   assert.ok(titleBox.x < 40, 'document title hugs the left side');
   assert.ok(formattingBox.y < 45, 'text formatting sits in the top header row');
-  assert.equal(await page.getByLabel('Font family').inputValue(), 'Arial', 'font defaults to Arial without a placeholder option');
+  assert.equal(await page.getByLabel('Font family').inputValue(), 'Inter', 'font defaults to Inter (bundled) without a placeholder option');
   assert.equal(await page.getByLabel('Font size').inputValue(), '3', 'font size defaults to Normal without a placeholder option');
 
   const text = page.locator('.text-block').first();
@@ -305,7 +321,9 @@ try {
   await page.keyboard.press('Control+b');
   await page.waitForTimeout(80);
   assert.equal(await boldActive(), true, 'the Ctrl+B shortcut toggles the Bold control back immediately at a collapsed caret');
-  await page.getByRole('button', { name: 'Anchor text to bottom' }).click();
+  // Vertical anchoring lives in the header's More-formatting dropdown.
+  await page.getByRole('button', { name: 'More formatting' }).click();
+  await page.getByRole('menuitem', { name: 'Anchor text to bottom' }).click();
   assert.equal(await page.locator('.page-card').first().evaluate((element) => getComputedStyle(element.querySelector('.page-face--front')).justifyContent), 'flex-end', 'text supports page-level vertical anchoring');
 
   await page.locator('.page-insert__trigger').click();
@@ -343,6 +361,24 @@ try {
   await firstPageWrapper.locator('.page-handle__notes').click();
   await page.waitForTimeout(80);
   assert.match((await firstPage.locator('.page-side-label').innerText()).trim(), /^notes$/i);
+  // The card is sized by the FRONT face alone: notes taller than the front never grow the
+  // tile — they scroll inside it (hidden native bar, shared overlay scrollbar).
+  const frontDefinedHeight = (await firstPage.boundingBox()).height;
+  assert.equal(await firstPageWrapper.locator('.notes-scrollbar').count(), 0, 'short notes render no overlay scrollbar');
+  await firstPage.locator('.page-face--back .text-block').click();
+  for (let noteLine = 0; noteLine < 18; noteLine += 1) {
+    await page.keyboard.type(`note line ${noteLine + 1}`);
+    await page.keyboard.press('Enter');
+  }
+  await page.waitForTimeout(120);
+  assert.ok(Math.abs((await firstPage.boundingBox()).height - frontDefinedHeight) < 1, 'notes taller than the front do not change the card height');
+  const notesOverflow = await firstPage.locator('.page-face--back .page-blocks').evaluate((element) => ({ scrollHeight: element.scrollHeight, clientHeight: element.clientHeight }));
+  assert.ok(notesOverflow.scrollHeight > notesOverflow.clientHeight + 10, 'overflowing notes scroll inside the tile instead of growing it');
+  assert.equal(await firstPageWrapper.locator('.notes-scrollbar').count(), 1, 'overflowing notes render the overlay scrollbar');
+  // Clear the notes again so the rest of the suite sees the document it expects.
+  await page.keyboard.press('Control+A');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(80);
   await firstPageWrapper.locator('.page-handle__notes').click();
 
   assert.equal(await page.getByTitle(/Use (light|dark) mode/).count(), 0, 'theme control is removed from the editor toolbar');
@@ -394,6 +430,24 @@ try {
   assert.equal(await page.locator('.page-card').last().locator('.page-face--front .page-side-label').count(), 0, 'drawing page front has no title');
   assert.ok(Math.abs(box.x - drawingCardBox.x) < 1 && Math.abs(box.width - drawingCardBox.width) < 1, 'drawing canvas fills the page width');
   assert.ok(drawingRailBox.x > drawingCardBox.x + drawingCardBox.width, 'drawing controls sit on the right');
+  const brushCursor = page.locator('.drawing-brush-cursor').last();
+  const brushCircle = brushCursor.locator('.drawing-brush-cursor__circle');
+  const renderedDrawingScale = box.width / await canvas.evaluate((element) => element.offsetWidth);
+  await page.mouse.move(box.x + 30, box.y + 30);
+  assert.ok(
+    Math.abs((await brushCircle.boundingBox()).width - 3 * renderedDrawingScale) < 0.2,
+    'drawing cursor circle matches the pen stroke diameter after UI scale'
+  );
+  const drawingWidth = page.getByLabel('Stroke width').last();
+  await drawingWidth.fill('10');
+  await page.getByRole('button', { name: 'Eraser' }).last().click();
+  await page.mouse.move(box.x + 31, box.y + 31);
+  assert.ok(
+    Math.abs((await brushCircle.boundingBox()).width - 20 * renderedDrawingScale) < 0.2,
+    'eraser cursor circle matches its doubled stroke diameter without counting the prongs'
+  );
+  await page.getByRole('button', { name: 'Pen' }).last().click();
+  await drawingWidth.fill('3');
   await page.mouse.move(box.x + 30, box.y + 30);
   await page.mouse.down();
   await page.mouse.move(box.x + 150, box.y + 120);
@@ -442,15 +496,18 @@ try {
   await page.waitForTimeout(30);
   const stableStrokeXFraction = 90 / box.width;
   const thicknessBeforeZoomBump = await scanColumnThickness(stableStrokeXFraction);
+  const cursorDiameterBeforeZoomBump = (await brushCircle.boundingBox()).width;
   const zoomBeforeBump = Number((await page.locator('.zoom-value').innerText()).replace('%', ''));
   await page.getByTitle('Zoom in (Ctrl++)').click();
   const zoomAfterBump = Number((await page.locator('.zoom-value').innerText()).replace('%', ''));
   assert.equal(zoomAfterBump, zoomBeforeBump + 10, 'zoom moved up one more step for the thickness check');
   await page.waitForTimeout(60);
   const thicknessAfterZoomBump = await scanColumnThickness(stableStrokeXFraction);
+  const cursorDiameterAfterZoomBump = (await brushCircle.boundingBox()).width;
   const thicknessRatio = thicknessAfterZoomBump / thicknessBeforeZoomBump;
   const expectedRatio = zoomAfterBump / zoomBeforeBump;
   assert.ok(Math.abs(thicknessRatio - expectedRatio) < 0.15, `stroke on-screen thickness should scale with zoom (~${expectedRatio.toFixed(3)}), got ${thicknessRatio.toFixed(3)} from ${thicknessBeforeZoomBump.toFixed(3)} to ${thicknessAfterZoomBump.toFixed(3)}`);
+  assert.ok(Math.abs(cursorDiameterAfterZoomBump / cursorDiameterBeforeZoomBump - expectedRatio) < 0.03, 'drawing cursor circle scales with workspace zoom by the same ratio as the stroke');
   await page.getByTitle('Zoom out (Ctrl+-)').click();
   assert.equal(await page.locator('.zoom-value').innerText(), `${zoomBeforeBump}%`, 'zoom restored for the remaining assertions');
 
@@ -712,11 +769,12 @@ try {
   const nativePath = 'C:\\Inktiles\\existing.inktile';
   const saveAsPath = 'C:\\Inktiles\\explicit-copy.inktile';
   const nativeContext = await browser.newContext({ viewport: { width: 1180, height: 820 } });
-  await nativeContext.addInitScript(({ archiveBytes, openPath, chosenPath }) => {
+  await nativeContext.addInitScript(({ archiveBytes, openPath, chosenPath, metadataImage }) => {
     window.__inktileNativeMock = {
       archiveBytes,
       openPath,
       chosenPath,
+      metadataImage,
       saveDialogCalls: 0,
       pendingWritePath: null,
       writePaths: []
@@ -742,26 +800,23 @@ try {
           return mock.chosenPath;
         }
         if (command === 'plugin:fs|read_file') return mock.archiveBytes;
-        if (command === 'plugin:fs|write_file') {
-          mock.pendingWritePath = decodeURIComponent(options?.headers?.path ?? '');
+        if (command === 'save_file_atomic') {
+          // Native document writes go through the app's own atomic command (bytes as the
+          // raw payload, target path percent-encoded in a header); the temp-then-rename
+          // dance lives in Rust now, so the mock records the confirmed destination only.
+          const target = decodeURIComponent(options?.headers?.['x-inktile-path'] ?? '');
+          if (!target) throw new Error('save_file_atomic was invoked without a target path header');
+          mock.writePaths.push(target);
           return null;
         }
-        if (command === 'plugin:fs|rename') {
-          // Every native document write must be atomic: bytes to `<target>.tmp`, then a
-          // rename over the target. writePaths records confirmed destinations only.
-          const oldPath = args?.oldPath ?? '';
-          const newPath = args?.newPath ?? '';
-          if (oldPath !== `${newPath}.tmp` || mock.pendingWritePath !== oldPath) {
-            throw new Error(`Unexpected write sequence: wrote ${mock.pendingWritePath}, renamed ${oldPath} -> ${newPath}`);
-          }
-          mock.writePaths.push(newPath);
-          mock.pendingWritePath = null;
-          return null;
+        if (command === 'fetch_link_metadata') {
+          // The desktop shell's Open Graph unfurler for the link popup's card.
+          return { title: 'Example Domain', description: 'A test destination for unfurled previews.', image: mock.metadataImage };
         }
         throw new Error(`Unexpected native mock command: ${command}`);
       }
     };
-  }, { archiveBytes: nativeArchiveBytes, openPath: nativePath, chosenPath: saveAsPath });
+  }, { archiveBytes: nativeArchiveBytes, openPath: nativePath, chosenPath: saveAsPath, metadataImage: `${smokeUrl}inktile-logo.png` });
 
   try {
     const nativePage = await nativeContext.newPage();
@@ -829,6 +884,24 @@ try {
     }));
     assert.equal(nativeState.saveDialogCalls, 1, 'Save As explicitly opens the destination dialog');
     assert.equal(nativeState.writePaths.at(-1), saveAsPath, 'Save As writes the chosen destination');
+
+    // Desktop link unfurling: the popup asks the shell for Open Graph metadata and
+    // renders the page's own card (image, title, description) instead of the live embed.
+    await nativePage.locator('.page-insert__trigger').click();
+    await nativePage.getByRole('button', { name: /^Text Write/ }).click();
+    const nativeText = nativePage.locator('.text-block').first();
+    await nativeText.click();
+    await nativePage.keyboard.type('see https://example.com/card ');
+    await nativeText.locator('a[href="https://example.com/card"]').click();
+    await nativePage.locator('.link-preview').waitFor({ state: 'visible' });
+    await nativePage.locator('.link-preview__card').waitFor({ state: 'visible' });
+    assert.equal(await nativePage.locator('.link-preview__card-title').innerText(), 'Example Domain', 'the desktop popup renders the unfurled page title');
+    assert.match(await nativePage.locator('.link-preview__card-desc').innerText(), /test destination/, 'the desktop popup renders the unfurled description');
+    assert.equal(await nativePage.locator('.link-preview__card img').count(), 1, 'the desktop popup renders the og:image');
+    assert.equal(await nativePage.locator('.link-preview__frame').count(), 0, 'the live embed stays unmounted when a metadata card is shown');
+    await nativePage.keyboard.press('Escape');
+    await nativePage.locator('.link-preview').waitFor({ state: 'detached' });
+
     assert.deepEqual(nativeConsoleErrors, [], `native mock console errors: ${nativeConsoleErrors.join('\n')}`);
   } finally {
     await nativeContext.close();
@@ -895,6 +968,67 @@ try {
   await page.waitForTimeout(120);
   assert.equal(await page.locator('.page-card.is-flipped').count(), 0, 'the F shortcut flips the selection back to the front');
 
+  // Multi-tile formatting: with tiles selected, toolbar formatting commands apply to every
+  // selected tile's whole text as one undo step. "Cursor stays put" is bold from the
+  // earlier toolbar test and "Chosen draft" is not — a mixed selection, so the first
+  // Ctrl+B must make BOTH fully bold instead of toggling each tile independently into
+  // the opposite mix.
+  await page.keyboard.press('Escape');
+  const boldTextWrapper = page.locator('.page-wrapper').filter({ hasText: 'Cursor stays put' }).first();
+  const plainTextWrapper = page.locator('.page-wrapper').filter({ hasText: 'Chosen draft' }).first();
+  await ctrlClickHandle(boldTextWrapper);
+  await ctrlClickHandle(plainTextWrapper);
+  assert.equal(await page.locator('.page-wrapper.is-selected').count(), 2, 'two text tiles are selected for the formatting checks');
+  const boldPattern = /font-weight:\s*(bold|[6-9]00)|<b[\s>]|<strong/i;
+  const underlinePattern = /text-decoration[^;"]*underline|<u[\s>]/i;
+  const boldTileHtml = () => boldTextWrapper.locator('.page-face--front .text-block').innerHTML();
+  const plainTileHtml = () => plainTextWrapper.locator('.page-face--front .text-block').innerHTML();
+  assert.match(await boldTileHtml(), boldPattern, 'precondition: the first selected tile is bold from the earlier test');
+  assert.doesNotMatch(await plainTileHtml(), boldPattern, 'precondition: the second selected tile is not bold');
+  await page.keyboard.press('Control+b');
+  await page.waitForTimeout(80);
+  assert.match(await boldTileHtml(), boldPattern, 'Ctrl+B on a mixed selection keeps the bold tile bold');
+  assert.match(await plainTileHtml(), boldPattern, 'Ctrl+B on a mixed selection bolds the plain tile');
+  await page.getByRole('button', { name: 'Underline' }).click();
+  await page.waitForTimeout(80);
+  assert.match(await boldTileHtml(), underlinePattern, 'the Underline button applies to the first selected tile');
+  assert.match(await plainTileHtml(), underlinePattern, 'the Underline button applies to the second selected tile');
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(80);
+  assert.doesNotMatch(await boldTileHtml(), underlinePattern, 'one undo reverts the whole multi-tile underline');
+  assert.doesNotMatch(await plainTileHtml(), underlinePattern, 'one undo reverts the underline on the second tile too');
+  assert.match(await plainTileHtml(), boldPattern, 'undoing the underline keeps the earlier multi-tile bold');
+  await page.keyboard.press('Control+b');
+  await page.waitForTimeout(80);
+  assert.doesNotMatch(await boldTileHtml(), boldPattern, 'Ctrl+B on an all-bold selection unbolds the first tile');
+  assert.doesNotMatch(await plainTileHtml(), boldPattern, 'Ctrl+B on an all-bold selection unbolds the second tile');
+  await page.keyboard.press('Escape');
+
+  // Audio tiles center their player bar vertically in the tile.
+  const wavBytes = (() => {
+    const dataLength = 3200;
+    const buffer = Buffer.alloc(44 + dataLength);
+    buffer.write('RIFF', 0); buffer.writeUInt32LE(36 + dataLength, 4); buffer.write('WAVE', 8);
+    buffer.write('fmt ', 12); buffer.writeUInt32LE(16, 16); buffer.writeUInt16LE(1, 20); buffer.writeUInt16LE(1, 22);
+    buffer.writeUInt32LE(8000, 24); buffer.writeUInt32LE(16000, 28); buffer.writeUInt16LE(2, 32); buffer.writeUInt16LE(16, 34);
+    buffer.write('data', 36); buffer.writeUInt32LE(dataLength, 40);
+    return buffer;
+  })();
+  const tileCountBeforeAudio = await page.locator('.page-wrapper').count();
+  await page.getByLabel('Choose media file').setInputFiles({ name: 'ping.wav', mimeType: 'audio/wav', buffer: wavBytes });
+  await page.waitForFunction((expected) => window.document.querySelectorAll('.page-wrapper').length === expected, tileCountBeforeAudio + 1);
+  const audioWrapper = page.locator('.page-wrapper').last();
+  assert.equal(await audioWrapper.locator('audio').count(), 1, 'the audio tile renders a player');
+  const audioFace = audioWrapper.locator('.page-face--front');
+  assert.equal(await audioFace.evaluate((element) => element.classList.contains('page-face--audio')), true, 'an audio tile tags its front face');
+  assert.equal(await audioFace.evaluate((element) => getComputedStyle(element).justifyContent), 'center', 'the audio player is vertically centered in its tile');
+  await audioWrapper.scrollIntoViewIfNeeded();
+  const audioHandleBox = await audioWrapper.locator('.page-handle__drag').boundingBox();
+  await page.mouse.click(audioHandleBox.x + audioHandleBox.width / 2, audioHandleBox.y + audioHandleBox.height / 2);
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(40);
+  assert.equal(await page.locator('.page-wrapper').count(), tileCountBeforeAudio, 'the audio tile deletes cleanly');
+
   // Group dragging: the last two tiles share the bottom row, so dragging one of their
   // selected handles above the top row must carry both, still grouped side by side.
   await page.keyboard.press('Escape');
@@ -947,7 +1081,8 @@ try {
   const edgeMenuStripBox = await page.locator('.page-row').first().locator('.page-row-resize-handle').boundingBox();
   await page.mouse.click(edgeMenuStripBox.x + edgeMenuStripBox.width / 2, edgeMenuStripBox.y + edgeMenuStripBox.height / 2, { button: 'right' });
   await page.locator('.home-menu').waitFor({ state: 'visible' });
-  await page.getByRole('menuitem', { name: 'Add tile here' }).click();
+  assert.equal(await page.getByRole('menuitem', { name: /^Add/ }).count(), 4, 'the edge menu offers every tile type');
+  await page.getByRole('menuitem', { name: 'Add text' }).click();
   await page.waitForTimeout(40);
   const idsAfterEdgeAdd = await page.locator('.page-wrapper').evaluateAll((elements) => elements.map((element) => element.dataset.pageId));
   assert.equal(idsAfterEdgeAdd.length, idsBeforeEdgePaste.length + 1, 'right-clicking an edge offers adding a tile at that spot');
@@ -987,9 +1122,10 @@ try {
   const pairMenuHandleBox = await pairRow.locator('.page-column-resize-handle').first().boundingBox();
   await page.mouse.click(pairMenuHandleBox.x + pairMenuHandleBox.width / 2, pairMenuHandleBox.y + pairMenuHandleBox.height / 2, { button: 'right' });
   await page.locator('.home-menu').waitFor({ state: 'visible' });
-  await page.getByRole('menuitem', { name: 'Add tile here' }).click();
+  await page.getByRole('menuitem', { name: 'Add drawing' }).click();
   await page.waitForTimeout(40);
   assert.equal(await pairRow.locator('.page-row__cell').count(), 3, 'the vertical edge menu adds a tile between the grouped tiles');
+  assert.equal(await pairRow.locator('.page-row__cell').nth(1).locator('canvas').count(), 1, 'the edge menu creates the chosen tile type (drawing)');
   await page.keyboard.press('Delete');
   await page.waitForTimeout(40);
   assert.equal(await page.locator('.page-wrapper').count(), idsBeforeEdgePaste.length, 'vertical edge insertions clean up for the remaining assertions');
@@ -1010,14 +1146,35 @@ try {
   const rightStripBox = await pairRow.locator('.page-row-side-edge--right').boundingBox();
   await page.mouse.click(rightStripBox.x + rightStripBox.width / 2, rightStripBox.y + rightStripBox.height / 2, { button: 'right' });
   await page.locator('.home-menu').waitFor({ state: 'visible' });
-  await page.getByRole('menuitem', { name: 'Add tile here' }).click();
+  await page.getByRole('menuitem', { name: 'Add versions' }).click();
   await page.waitForTimeout(40);
   assert.equal(await pairRow.locator('.page-row__cell').count(), 3, 'the right edge menu adds a tile at the end of the row');
   const lastCellId = await pairRow.locator('.page-row__cell').last().locator('[data-page-id]').evaluate((element) => element.dataset.pageId);
   assert.ok(!idsBeforeEdgePaste.includes(lastCellId), 'the added tile becomes the last tile of the row');
+  assert.equal(await pairRow.locator('.variant-block').count(), 1, 'the edge menu creates the chosen tile type (versions)');
   await page.keyboard.press('Delete');
   await page.waitForTimeout(40);
   assert.equal(await page.locator('.page-wrapper').count(), idsBeforeEdgePaste.length, 'side edge insertions clean up for the remaining assertions');
+
+  // The tile menu offers the same four types; media routes through the file picker and
+  // lands right below the clicked tile.
+  const menuTileBox = await page.locator('.page-wrapper').first().locator('.page-card').boundingBox();
+  await page.mouse.click(menuTileBox.x + menuTileBox.width / 2, menuTileBox.y + 6, { button: 'right' });
+  await page.locator('.home-menu').waitFor({ state: 'visible' });
+  const tileCountBeforeMenuMedia = await page.locator('.page-wrapper').count();
+  const menuMediaChooserPromise = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: 'Add media' }).click();
+  const menuMediaChooser = await menuMediaChooserPromise;
+  await menuMediaChooser.setFiles({ name: 'menu-ping.wav', mimeType: 'audio/wav', buffer: wavBytes });
+  await page.waitForFunction((expected) => window.document.querySelectorAll('.page-wrapper').length === expected, tileCountBeforeMenuMedia + 1);
+  const menuAudioWrapper = page.locator('.page-wrapper').filter({ has: page.locator('audio') }).first();
+  assert.equal(await menuAudioWrapper.locator('audio').count(), 1, 'the context menu adds media tiles through the file picker');
+  await menuAudioWrapper.scrollIntoViewIfNeeded();
+  const menuAudioHandleBox = await menuAudioWrapper.locator('.page-handle__drag').boundingBox();
+  await page.mouse.click(menuAudioHandleBox.x + menuAudioHandleBox.width / 2, menuAudioHandleBox.y + menuAudioHandleBox.height / 2);
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(40);
+  assert.equal(await page.locator('.page-wrapper').count(), tileCountBeforeMenuMedia, 'the menu-added media tile cleans up');
 
   // Edge strips only light up while the cursor is over the strip itself: hovering a
   // tile must not bold the row edge below it or the vertical edge beside it.
@@ -1048,7 +1205,7 @@ try {
   // runs, live op streaming into the document, the revision guard rejecting stale writes,
   // one-undo-per-turn semantics, and the stop button keeping partial work.
   await page.evaluate(() => {
-    const state = { receive: null, log: { staleRejected: false, stopRequested: false, error: null, opFailure: null, model: null, imageSizing: null } };
+    const state = { receive: null, log: { staleRejected: false, stopRequested: false, error: null, opFailure: null, model: null, imageSizing: null, strokeOps: null, strokeSummary: null, clampedHeight: null, narrowRejected: false } };
     window.__inktileAgentMockState = state;
     const waiters = [];
     const results = [];
@@ -1105,6 +1262,23 @@ try {
       await mustOk({ kind: 'edit_versions', pageId: versions.pageId, activeIndex: 1 });
       const drawing = await mustOk({ kind: 'create_drawing', afterPageId: versions.pageId, height: 260, strokes: [{ tool: 'pen', width: 4, points: [{ x: 0.2, y: 0.2 }, { x: 0.5, y: 0.4 }, { x: 0.8, y: 0.8 }] }] });
       await mustOk({ kind: 'edit_drawing', pageId: drawing.pageId, strokes: [{ tool: 'highlighter', points: [{ x: 0.1, y: 0.9 }, { x: 0.9, y: 0.9 }] }], mode: 'append' });
+      // Stroke-level control: full read, restyle + translate by id, precise delete.
+      const drawingRead = await mustOk({ kind: 'read_drawing', pageId: drawing.pageId });
+      const strokeIds = drawingRead.drawing.strokes.map((stroke) => stroke.id);
+      await mustOk({ kind: 'modify_strokes', pageId: drawing.pageId, strokeIds: [strokeIds[0]], dx: 0.1, dy: -0.05, tool: 'highlighter', width: 8 });
+      await mustOk({ kind: 'delete_strokes', pageId: drawing.pageId, strokeIds: [strokeIds[1]] });
+      const drawingAfter = await mustOk({ kind: 'read_drawing', pageId: drawing.pageId });
+      state.log.strokeOps = {
+        beforeCount: drawingRead.drawing.strokes.length,
+        beforeFirst: drawingRead.drawing.strokes[0],
+        canvas: { widthPx: drawingRead.drawing.widthPx, height: drawingRead.drawing.height },
+        afterCount: drawingAfter.drawing.strokes.length,
+        afterFirst: drawingAfter.drawing.strokes[0]
+      };
+      // Range enforcement: a drawing row cannot store less than its 240px floor;
+      // the op clamps and reports the applied height.
+      const clamped = await mustOk({ kind: 'set_row_height', pageId: drawing.pageId, height: 96 });
+      state.log.clampedHeight = clamped.height;
       await mustOk({ kind: 'insert_media', afterPageId: drawing.pageId, filename: 'ping.wav', mimeType: 'audio/wav', alt: 'test tone', bytesBase64: wavBase64 });
       // A 2:1 SVG: its row must auto-size to the aspect ratio, and read_document
       // must report the pixel geometry (pageWidth, widthPx, intrinsic size).
@@ -1118,8 +1292,15 @@ try {
         height: imagePage.height,
         asset: `${imagePage.asset?.width}x${imagePage.asset?.height}`
       } : null;
+      const drawingPage = reread.document.pages.find((candidate) => candidate.id === drawing.pageId);
+      state.log.strokeSummary = drawingPage?.drawing?.strokes?.[0] ?? null;
       await mustOk({ kind: 'set_row_height', pageId, height: 300 });
       await mustOk({ kind: 'edit_notes', pageId, html: '<p>note from inkjet</p>' });
+      // Width splits reject columns narrower than the app's 120px drag floor.
+      await mustOk({ kind: 'arrange_pages', pageId: versions.pageId, targetPageId: pageId, position: 'right' });
+      const tooNarrow = await sendOp({ kind: 'set_row_widths', pageId, fractions: [0.05, 0.95], baseRevision: revision });
+      state.log.narrowRejected = tooNarrow.ok === false && /at least/.test(tooNarrow.error || '');
+      await mustOk({ kind: 'set_row_widths', pageId, fractions: [0.3, 0.7] });
       await mustOk({ kind: 'delete_pages', pageIds: [versions.pageId, image.pageId] });
       state.receive(JSON.stringify({ type: 'answer', promptId: prompt.promptId, text: 'Wrote a **short report** into a new page…\n\n- reading the document\n- streaming the text' }));
       state.receive(JSON.stringify({ type: 'turn-end', promptId: prompt.promptId, reason: 'done' }));
@@ -1227,6 +1408,18 @@ try {
   await page.locator('.workspace--agent-locked').waitFor({ state: 'visible' });
   assert.equal(await page.locator('.inkjet-turn-indicator').count(), 1, 'an Inkjet turn shows the printing indicator with its stop button');
   assert.match(await page.locator('.inkjet-turn-indicator').innerText(), /printing/i, 'the turn indicator reads "Inkjet is printing"');
+  assert.equal(await page.locator('.inkjet-lock-scrim').count(), 1, 'a full-viewport scrim locks everything except the Inkjet surfaces during a turn');
+  // Follow mode: the indicator's toggle arms viewport tracking of the agent's
+  // work; a manual wheel gesture over the document hands control back.
+  const followButton = page.locator('.inkjet-turn-indicator__follow');
+  assert.equal(await followButton.getAttribute('aria-pressed'), 'false', 'the follow toggle starts disarmed');
+  await followButton.click();
+  assert.equal(await followButton.getAttribute('aria-pressed'), 'true', 'clicking the follow toggle arms it');
+  await page.mouse.move(300, 400);
+  await page.mouse.wheel(0, 80);
+  await page.waitForFunction(() =>
+    document.querySelector('.inkjet-turn-indicator__follow')?.getAttribute('aria-pressed') === 'false'
+  );
   assert.equal(await page.locator('.text-block').first().getAttribute('contenteditable'), 'false', 'text blocks are read-only while the agent holds the document');
   // Live streaming: partial content must be visible while the lock is still on.
   await page.waitForFunction(() =>
@@ -1248,6 +1441,7 @@ try {
     return card && card.textContent.length > 0 && !card.textContent.includes('streaming the text');
   });
   await page.locator('.workspace--agent-locked').waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.inkjet-lock-scrim').count(), 0, 'the lock scrim leaves with the turn');
   await page.waitForFunction(() =>
     (document.querySelector('.inkjet-entry--agent')?.textContent ?? '').includes('streaming the text')
   );
@@ -1263,8 +1457,31 @@ try {
   assert.equal(imageSizing.widthPx, imageSizing.pageWidth, 'a full-row tile reports the document width as its rendered width');
   assert.equal(imageSizing.asset, '200x100', 'read_document reports intrinsic media dimensions');
   assert.equal(imageSizing.height, Math.round(imageSizing.pageWidth / 2), 'an inserted image auto-sizes its row to the media aspect ratio');
+  // Stroke-level drawing control: full read, modify by id, precise delete, summaries.
+  const strokeOps = agentMockLog.strokeOps;
+  assert.equal(strokeOps.beforeCount, 2, 'read_drawing returns the full stroke list');
+  assert.equal(strokeOps.beforeFirst.tool, 'pen', 'read_drawing reports each stroke tool');
+  assert.equal(strokeOps.beforeFirst.points.length, 3, 'read_drawing returns per-stroke point data');
+  assert.ok(strokeOps.canvas.widthPx > 0 && strokeOps.canvas.height === 260, 'read_drawing reports the canvas geometry');
+  assert.equal(strokeOps.afterCount, 1, 'delete_strokes removed exactly the targeted stroke');
+  assert.equal(strokeOps.afterFirst.tool, 'highlighter', 'modify_strokes restyled the stroke tool');
+  assert.equal(strokeOps.afterFirst.width, 8, 'modify_strokes set the stroke width');
+  assert.deepEqual(
+    strokeOps.afterFirst.points.map((point) => `${point.x},${point.y}`),
+    ['0.3,0.15', '0.6,0.35', '0.9,0.75'],
+    'modify_strokes translated the stroke points'
+  );
+  const strokeSummary = agentMockLog.strokeSummary;
+  assert.ok(
+    strokeSummary && strokeSummary.pointCount === 3 && strokeSummary.bounds.x0 === 0.3 && strokeSummary.bounds.y1 === 0.75,
+    'read_document carries per-stroke summaries with bounds'
+  );
+  // Sizing ops mirror the UI's own limits: content-floor clamping and column minimums.
+  assert.equal(agentMockLog.clampedHeight, 240, 'set_row_height clamps to the row content floor and reports the applied value');
+  assert.equal(agentMockLog.narrowRejected, true, 'set_row_widths rejects columns narrower than the app minimum');
   // Text + drawing + audio pages remain; the versions page was inserted, reworked, then deleted.
   assert.equal(await page.locator('.page-wrapper').count(), pagesBeforeAgentTurn + 3, 'the turn added a text, a drawing, and an audio page');
+  assert.ok(await page.locator('.page-row__cell--born').count() >= 3, 'tiles created during the turn carry the born fade-in class');
   assert.equal(await page.locator('.variant-block').count(), versionsBeforeAgentTurn, 'the versions page the agent created and deleted is gone');
   assert.equal(await page.locator('.page-card--drawing').count(), drawingsBeforeAgentTurn + 1, 'the agent authored a drawing page');
   assert.equal(await page.locator('.document-title').inputValue(), 'Inkjet Report', 'the agent renamed the document');
@@ -1342,8 +1559,8 @@ try {
   const dripSurvivesUndo = await page.evaluate(() => [...document.querySelectorAll('.text-block')].some((element) => element.textContent.includes('drip')));
   assert.equal(dripSurvivesUndo, false, 'a stopped turn still reverts as one undo step');
   assert.equal(await page.locator('.page-wrapper').count(), pagesBeforeAgentTurn, 'the stopped turn leaves no leftover pages after undo');
-  // "New session" returns to the provider screen.
-  await page.getByRole('button', { name: 'New session' }).click();
+  // "Exit session" returns to the provider screen.
+  await page.getByRole('button', { name: 'Exit session' }).click();
   await page.getByRole('button', { name: 'Start session' }).waitFor({ state: 'visible' });
   await page.getByRole('button', { name: 'Inkjet panel' }).click();
 
@@ -1355,6 +1572,301 @@ try {
   assert.ok(homeChangedViewNextFrame, 'returning home changes view by the next animation frame');
   await page.locator('.inktile-card[data-inktile-id]').waitFor({ state: 'visible' });
   assert.match(await page.locator('.inktile-card[data-inktile-id]').first().innerText(), /Untitled Inktile/i, 'the edited inktile returns to the home library');
+
+  // Rich text structures — checklists, tables, markdown autoformat, and KaTeX math — get
+  // their own fresh inktile so they cannot disturb the earlier layout assertions.
+  await page.getByRole('button', { name: /^New inktile/ }).click();
+  await page.locator('.page-insert__trigger').waitFor({ state: 'visible' });
+  await page.locator('.document-title').fill('Rich content');
+  await page.locator('.page-insert__trigger').click();
+  await page.getByRole('button', { name: /^Text Write/ }).click();
+  const richText = page.locator('.text-block').first();
+  await richText.click();
+
+  // Markdown autoformat: "1. " converts on the space, and one undo restores the marker.
+  await page.keyboard.type('1. ');
+  await page.waitForTimeout(30);
+  assert.equal(await richText.locator('ol').count(), 1, 'typing "1. " autoformats into an ordered list');
+  await page.evaluate(() => { const element = window.document.activeElement; if (element && element !== window.document.body && typeof element.blur === 'function') element.blur(); });
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(40);
+  assert.equal(await richText.locator('ol').count(), 0, 'undoing the autoformat removes the list');
+  assert.match(await richText.innerText(), /1\./, 'undoing the autoformat restores the literal marker');
+
+  // The dropdown's "Insert divider line" drops a full-width rule at the caret — the
+  // same <hr> the "---" autoformat produces.
+  await richText.click();
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Delete');
+  await page.keyboard.type('ab');
+  await page.keyboard.press('ArrowLeft');
+  await page.getByRole('button', { name: 'More formatting' }).click();
+  await page.getByRole('menuitem', { name: 'Insert divider line' }).click();
+  await page.waitForTimeout(40);
+  assert.equal(await richText.locator('hr').count(), 1, 'the dropdown inserts a horizontal rule at the caret');
+
+  // Checklist: "[] " starts one, the gutter click toggles state without editing text, and
+  // Enter after a checked item starts an unchecked one.
+  await richText.click();
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Delete');
+  await page.keyboard.type('[] ');
+  assert.equal(await richText.locator('ul.checklist').count(), 1, 'typing "[] " starts a checklist');
+  await page.keyboard.type('first task');
+  await page.getByRole('button', { name: 'More formatting' }).click();
+  assert.equal(
+    await page.getByRole('menuitem', { name: 'Checklist' }).evaluate((button) => button.classList.contains('is-active')),
+    true,
+    'the Checklist item shows an active state inside a checklist'
+  );
+  assert.equal(
+    await page.getByRole('menuitem', { name: 'Bulleted list' }).evaluate((button) => button.classList.contains('is-active')),
+    false,
+    'the bullet item stays off inside a checklist (the ul is decorated, not plain)'
+  );
+  await page.keyboard.press('Escape');
+  await page.locator('.format-menu').waitFor({ state: 'detached' });
+  const checkItemBox = await richText.locator('ul.checklist > li').first().boundingBox();
+  await page.mouse.click(checkItemBox.x + 8, checkItemBox.y + 10);
+  assert.equal(await richText.locator('ul.checklist > li').first().getAttribute('data-checked'), 'true', 'clicking the box checks the item');
+  assert.match(await richText.locator('ul.checklist > li').first().innerText(), /first task/, 'toggling the box does not edit the item text');
+  await richText.locator('ul.checklist > li').first().click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('second task');
+  assert.deepEqual(
+    await richText.locator('ul.checklist > li').evaluateAll((items) => items.map((item) => item.getAttribute('data-checked'))),
+    ['true', 'false'],
+    'Enter after a checked item starts an unchecked one'
+  );
+
+  // Tables: toolbar insert seats the caret in the first header cell, Tab walks the cells
+  // (appending a row from the last one), and the text context menu edits structure.
+  await page.keyboard.press('Control+End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: 'More formatting' }).click();
+  await page.getByRole('menuitem', { name: 'Insert table' }).click();
+  assert.equal(await richText.locator('table.text-table').count(), 1, 'the toolbar inserts a table');
+  assert.equal(await richText.locator('table.text-table tr').count(), 3, 'the starter table has three rows');
+  await page.keyboard.type('Header A');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('Header B');
+  assert.match(await richText.locator('table.text-table th').first().innerText(), /Header A/, 'typing lands in the first header cell');
+  assert.match(await richText.locator('table.text-table th').nth(1).innerText(), /Header B/, 'Tab moves the caret to the next cell');
+  await richText.locator('table.text-table tr:last-child td:last-child').click();
+  await page.keyboard.press('Tab');
+  assert.equal(await richText.locator('table.text-table tr').count(), 4, 'Tab on the last cell appends a row');
+  await richText.locator('table.text-table td').first().click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Insert column right' }).click();
+  assert.equal(await richText.locator('table.text-table tr').first().locator('th').count(), 4, 'the context menu inserts a column across every row');
+  await richText.locator('table.text-table td').first().click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Delete row' }).click();
+  assert.equal(await richText.locator('table.text-table tr').count(), 3, 'the context menu deletes the clicked row');
+
+  // Context-menu table edits are discrete undo steps — and undo must repaint even though
+  // the tile still holds focus (history restore releases rich-text focus first).
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(60);
+  assert.equal(await richText.locator('table.text-table tr').count(), 4, 'a context-menu table edit undoes as one discrete step, without blurring first');
+  await page.keyboard.press('Control+y');
+  await page.waitForTimeout(60);
+  assert.equal(await richText.locator('table.text-table tr').count(), 3, 'redo reapplies the table edit');
+
+  // Up/Down arrows step between table rows, staying in the same column.
+  const caretCellProbe = () => page.evaluate(() => {
+    const selection = document.getSelection();
+    const node = selection ? selection.anchorNode : null;
+    const element = node ? (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement) : null;
+    const cell = element ? element.closest('td, th') : null;
+    return cell ? { tag: cell.tagName, column: cell.cellIndex } : null;
+  });
+  await richText.locator('table.text-table th').first().click();
+  await page.keyboard.press('ArrowDown');
+  assert.deepEqual(await caretCellProbe(), { tag: 'TD', column: 0 }, 'ArrowDown jumps from the header into the next row, same column');
+  await page.keyboard.press('ArrowUp');
+  assert.deepEqual(await caretCellProbe(), { tag: 'TH', column: 0 }, 'ArrowUp jumps back up into the header row');
+
+  // Math fields: the editor previews KaTeX, the field stores only TeX (empty light DOM,
+  // KaTeX in the shadow root), and clicking a field reopens its source.
+  await richText.locator('table.text-table td').first().click();
+  await page.keyboard.press('Control+End');
+  await page.getByRole('button', { name: 'More formatting' }).click();
+  await page.getByRole('menuitem', { name: 'Insert math' }).click();
+  await page.locator('.math-editor').waitFor({ state: 'visible' });
+  await page.locator('.math-editor__source').fill('E = mc^2');
+  await page.waitForFunction(() => document.querySelector('.math-editor__preview .katex'));
+  await page.getByRole('button', { name: 'Done' }).click();
+  await page.locator('.math-editor').waitFor({ state: 'detached' });
+  const mathProbe = await richText.locator('.math-field').first().evaluate((element) => ({
+    tex: element.getAttribute('data-tex'),
+    light: element.innerHTML,
+    shadowKatex: Boolean(element.shadowRoot && element.shadowRoot.querySelector('.katex'))
+  }));
+  assert.equal(mathProbe.tex, 'E = mc^2', 'the math field stores its TeX source');
+  assert.equal(mathProbe.light.replace(/​/g, ''), '', 'the math field keeps an empty light DOM — KaTeX lives in the shadow root, never in stored HTML');
+  assert.equal(mathProbe.shadowKatex, true, 'the math field renders KaTeX into its shadow root');
+  await richText.locator('.math-field').first().click();
+  await page.locator('.math-editor').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.math-editor__source').inputValue(), 'E = mc^2', 'clicking a math field reopens its TeX source');
+  await page.locator('.math-editor__display input').check();
+  await page.getByRole('button', { name: 'Done' }).click();
+  assert.equal(await richText.locator('.math-field').first().getAttribute('data-display'), 'true', 'display mode persists on the field');
+
+  // Saving math refocuses the tile; Ctrl+Z straight after must still visibly revert
+  // (undo releases tile focus so the restored HTML repaints), and redo restores it.
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(60);
+  assert.equal(await richText.locator('.math-field').first().getAttribute('data-display'), 'false', 'Ctrl+Z right after saving math reverts the edit without a manual blur');
+  await page.keyboard.press('Control+y');
+  await page.waitForTimeout(60);
+  assert.equal(await richText.locator('.math-field').first().getAttribute('data-display'), 'true', 'Ctrl+Y restores the reverted math edit');
+
+  // Ctrl+Z while typing in the math editor's textarea stays native text undo: the
+  // document's structural undo must not fire underneath the popover.
+  await richText.locator('.math-field').first().click();
+  await page.locator('.math-editor').waitFor({ state: 'visible' });
+  await page.keyboard.press('End');
+  await page.keyboard.type('+x');
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(40);
+  assert.equal(await page.locator('.math-editor').count(), 1, 'structural undo does not fire while the TeX textarea has focus');
+  assert.equal(await richText.locator('.math-field').first().getAttribute('data-display'), 'true', 'the document is untouched by textarea undo');
+  await page.keyboard.press('Escape');
+  await page.locator('.math-editor').waitFor({ state: 'detached' });
+
+  // Links: a URL followed by a space autolinks (the space lands outside the anchor), a
+  // plain click opens the preview popover instead of navigating, and Ctrl+Click opens
+  // externally right away. The target is served by the smoke server so the embedded
+  // preview loads deterministically.
+  const previewUrl = `${smokeUrl}migration-seed`;
+  await richText.click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type(`see ${previewUrl} next`);
+  const autoLink = richText.locator(`a[href="${previewUrl}"]`);
+  assert.equal(await autoLink.count(), 1, 'typing a URL followed by a space autolinks it');
+  assert.doesNotMatch(await autoLink.innerText(), /next/, 'the triggering space and later typing land outside the link');
+  await autoLink.click();
+  assert.equal(new URL(page.url()).pathname, '/', 'a plain click on a tile link does not navigate the app');
+  await page.locator('.link-preview').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.link-preview input[aria-label="Link URL"]').inputValue(), previewUrl, 'the popup offers the destination URL for editing');
+  assert.equal(await page.locator('.link-preview input[aria-label="Link text"]').inputValue(), previewUrl, 'the popup offers the display text for editing');
+  // The preview section stays hidden until the embedded page actually loads.
+  await page.waitForFunction(() => {
+    const frame = document.querySelector('.link-preview__frame');
+    return frame && frame.getBoundingClientRect().height > 100;
+  });
+  assert.equal(await page.locator('.link-preview__frame object').getAttribute('data'), previewUrl, 'the popup embeds a preview of the destination');
+  const previewPopupPromise = context.waitForEvent('page');
+  await page.locator('.link-preview').getByRole('button', { name: 'Open link' }).click();
+  const previewPopup = await previewPopupPromise;
+  await previewPopup.close();
+  assert.equal(new URL(page.url()).pathname, '/', 'opening from the popup leaves the app where it was');
+  // Inline edit: rewriting the display text keeps the destination.
+  await page.locator('.link-preview input[aria-label="Link text"]').fill('seed page');
+  await page.locator('.link-preview').getByRole('button', { name: 'Apply' }).click();
+  await page.locator('.link-preview').waitFor({ state: 'detached' });
+  assert.equal((await autoLink.innerText()).trim(), 'seed page', 'Apply rewrites the link text in place');
+  assert.equal(await autoLink.getAttribute('href'), previewUrl, 'the destination stays when only the text changes');
+  await autoLink.click();
+  await page.locator('.link-preview').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.link-preview input[aria-label="Link text"]').inputValue(), 'seed page', 'reopening the popup prefills the current text');
+  await page.keyboard.press('Escape');
+  await page.locator('.link-preview').waitFor({ state: 'detached' });
+
+  // A destination that refuses embedding (X-Frame-Options, like most large sites) must
+  // show no preview section at all: Chromium commits its "sad file" error page and still
+  // fires load, so the popup reveals the frame only for provable non-error loads.
+  const deniedUrl = `${smokeUrl}framed-deny`;
+  await richText.click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type(` ${deniedUrl} `);
+  const deniedLink = richText.locator(`a[href="${deniedUrl}"]`);
+  assert.equal(await deniedLink.count(), 1, 'the embedding-refusing URL autolinks too');
+  await deniedLink.click();
+  await page.locator('.link-preview').waitFor({ state: 'visible' });
+  await page.waitForTimeout(700);
+  assert.ok(
+    await page.locator('.link-preview__frame').evaluate((element) => element.getBoundingClientRect().height < 2),
+    'a site that refuses embedding shows no preview section (no error-page thumbnail)'
+  );
+  await page.keyboard.press('Escape');
+  await page.locator('.link-preview').waitFor({ state: 'detached' });
+
+  // Pasting a URL autolinks too: at a caret it inserts the linked URL, over a selection
+  // it links the selected text.
+  const dispatchPaste = (payload) => richText.evaluate((element, value) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', value);
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  }, payload);
+  await richText.click();
+  await page.keyboard.press('Control+End');
+  const pastedUrl = 'https://example.net/spec';
+  await dispatchPaste(pastedUrl);
+  const pastedLink = richText.locator(`a[href="${pastedUrl}"]`);
+  assert.equal(await pastedLink.count(), 1, 'pasting a bare URL at the caret inserts it as a link');
+  assert.equal((await pastedLink.innerText()).trim(), pastedUrl, 'the pasted link keeps the URL as its text');
+  await page.keyboard.type(' after');
+  assert.doesNotMatch(await pastedLink.innerText(), /after/, 'typing after a pasted link stays outside it');
+  await page.keyboard.type(' target');
+  await page.keyboard.press('Control+Shift+ArrowLeft');
+  await dispatchPaste('www.example.net/wrapped');
+  const wrappedLink = richText.locator('a[href="https://www.example.net/wrapped"]');
+  assert.equal(await wrappedLink.count(), 1, 'pasting a URL over a selection links it (www gets https://)');
+  assert.equal((await wrappedLink.innerText()).trim(), 'target', 'the selection keeps its text as the link label');
+  await page.keyboard.type(' ');
+  // Ctrl+Click bypasses the preview and opens the destination directly.
+  const popupPromise = context.waitForEvent('page');
+  await autoLink.click({ modifiers: ['Control'] });
+  const linkPopup = await popupPromise;
+  await linkPopup.close();
+  assert.equal(await page.locator('.link-preview').count(), 0, 'Ctrl+Click does not open the preview popover');
+
+  // The link editor: Ctrl+K wraps the current selection, normalizing bare domains.
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type(' guide');
+  await page.keyboard.press('Control+Shift+ArrowLeft');
+  await page.keyboard.press('Control+k');
+  await page.locator('.link-menu').waitFor({ state: 'visible' });
+  await page.locator('.link-menu input').fill('example.org/guide');
+  await page.keyboard.press('Enter');
+  await page.locator('.link-menu').waitFor({ state: 'detached' });
+  const guideLink = richText.locator('a[href="https://example.org/guide"]');
+  assert.equal(await guideLink.count(), 1, 'Ctrl+K wraps the selection in a link and bare domains get https://');
+  assert.equal((await guideLink.innerText()).trim(), 'guide', 'the link keeps the selected text');
+
+  // The rich structures survive a save/reopen cycle, and the mount pass re-renders math
+  // from the persisted TeX alone.
+  await page.getByRole('button', { name: 'Back to inktiles' }).click();
+  await page.getByRole('button', { name: 'Open Rich content' }).waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: 'Open Rich content' }).click();
+  await page.locator('.text-block').first().waitFor({ state: 'visible' });
+  const reopenedRich = page.locator('.text-block').first();
+  assert.equal(await reopenedRich.locator('ul.checklist > li[data-checked="true"]').count(), 1, 'checklist state survives a save/reopen cycle');
+  assert.equal(await reopenedRich.locator('table.text-table').count(), 1, 'the table survives a save/reopen cycle');
+  assert.equal(await reopenedRich.locator(`a[href="${previewUrl}"]`).count(), 1, 'links survive a save/reopen cycle');
+  await page.waitForFunction(() => {
+    const field = document.querySelector('.text-block .math-field');
+    return field && field.shadowRoot && field.shadowRoot.querySelector('.katex');
+  });
+
+  // Plain-text export keeps the structures legible: [x] items, pipe-separated rows, TeX.
+  const richExportPromise = page.waitForEvent('download');
+  await page.locator('button[title="Export…"]').click();
+  await page.locator('.export-option', { hasText: 'Text file' }).click();
+  const richExportText = await readFile(await (await richExportPromise).path(), 'utf8');
+  assert.match(richExportText, /\[x\] first task/, 'text export renders checked items as [x]');
+  assert.match(richExportText, /\[ \] second task/, 'text export renders unchecked items as [ ]');
+  // The inserted column sits between the two headers, so the row reads A | (empty) | B.
+  assert.match(richExportText, /Header A \|\s+\| Header B/, 'text export renders table rows pipe-separated');
+  assert.ok(richExportText.includes('$$E = mc^2$$'), 'text export keeps display math as TeX');
+  assert.match(richExportText, /guide \(https:\/\/example\.org\/guide\)/, 'text export keeps link destinations visible');
+  assert.ok(richExportText.includes(`seed page (${previewUrl})`), 'text export shows the destination for renamed links');
+
+  await page.getByRole('button', { name: 'Back to inktiles' }).click();
+  await page.locator('.inktile-card[data-inktile-id]').first().waitFor({ state: 'visible' });
   await page.screenshot({ path: 'inktile-preview.png', fullPage: true });
   assert.deepEqual(consoleErrors, [], `browser console errors: ${consoleErrors.join('\n')}`);
   console.log('Browser interaction smoke test passed.');

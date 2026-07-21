@@ -1,15 +1,16 @@
 import { flushSync } from "react-dom";
 import type { DocumentContextValue } from "../document/DocumentContext";
-import { MIN_DRAWING_HEIGHT, MIN_MEDIA_HEIGHT, uuid } from "../document/factories";
+import { MIN_DRAWING_HEIGHT, MIN_MEDIA_HEIGHT, MIN_VERSIONS_HEIGHT, uuid } from "../document/factories";
 import { detectMediaPageType } from "../document/mediaTypes";
-import type { DrawingStroke, InktileDocument, InktilePage, RuntimeAssetMap, VariantGroupBlock } from "../document/types";
+import type { DrawingBlock, DrawingStroke, InktileDocument, InktilePage, RuntimeAssetMap, VariantGroupBlock } from "../document/types";
 import type {
   AgentDocumentSnapshot,
   AgentOp,
   AgentOpErrorCode,
   AgentOpResult,
   AgentPageSnapshot,
-  AgentStroke
+  AgentStroke,
+  AgentStrokeSummary
 } from "./protocol";
 
 const MIN_ROW_HEIGHT = 96;
@@ -70,6 +71,29 @@ const measureAsset = async (assetId: string, assets: RuntimeAssetMap, kind: "ima
   return size;
 };
 
+const round2 = (value: number) => Math.round(value * 100) / 100;
+const round3 = (value: number) => Math.round(value * 1000) / 1000;
+
+const strokeSummary = (stroke: DrawingStroke): AgentStrokeSummary => {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  stroke.points.forEach((point) => {
+    x0 = Math.min(x0, point.x);
+    y0 = Math.min(y0, point.y);
+    x1 = Math.max(x1, point.x);
+    y1 = Math.max(y1, point.y);
+  });
+  return {
+    id: stroke.id,
+    tool: stroke.tool,
+    width: stroke.width,
+    opacity: round3(stroke.opacity),
+    pointCount: stroke.points.length,
+    bounds: stroke.points.length
+      ? { x0: round2(x0), y0: round2(y0), x1: round2(x1), y1: round2(y1) }
+      : { x0: 0, y0: 0, x1: 0, y1: 0 }
+  };
+};
+
 const mediaBlockOf = (page: InktilePage) => {
   const block = page.type === "drawing" ? undefined : page.front.blocks[0];
   return block && (block.type === "image" || block.type === "video") ? block : undefined;
@@ -84,11 +108,16 @@ const pageSnapshot = (document: InktileDocument, page: InktilePage, widthPx: num
     notesHtml: notesHtml(page)
   } satisfies Partial<AgentPageSnapshot>;
   if (page.type === "drawing") {
+    const strokes = page.drawing?.strokes ?? [];
     return {
       id: page.id,
       component: "drawing",
       ...shared,
-      drawing: { height: page.drawing?.height ?? MIN_DRAWING_HEIGHT, strokeCount: page.drawing?.strokes.length ?? 0 }
+      drawing: {
+        height: page.drawing?.height ?? MIN_DRAWING_HEIGHT,
+        strokeCount: strokes.length,
+        strokes: strokes.map(strokeSummary)
+      }
     };
   }
   const block = page.front.blocks[0];
@@ -172,6 +201,23 @@ const requireVersionsBlock = (context: DocumentContextValue, pageId: string): Va
   return block;
 };
 
+const requireDrawing = (context: DocumentContextValue, pageId: string): { page: InktilePage; drawing: DrawingBlock } => {
+  const page = requirePage(context, pageId);
+  if (page.type !== "drawing" || !page.drawing) throw new AgentOpError("invalid", `Page ${pageId} is not a drawing page.`);
+  return { page, drawing: page.drawing };
+};
+
+const requireStrokeIds = (input: string[], drawing: DrawingBlock): Set<string> => {
+  if (!Array.isArray(input) || input.length === 0) throw new AgentOpError("invalid", "Provide at least one stroke id.");
+  const ids = new Set(input.map(String));
+  const existing = new Set(drawing.strokes.map((stroke) => stroke.id));
+  const missing = [...ids].filter((id) => !existing.has(id));
+  if (missing.length) {
+    throw new AgentOpError("not-found", `No stroke(s) ${missing.join(", ")} on this page; call read_drawing for current stroke ids.`);
+  }
+  return ids;
+};
+
 const requireRow = (context: DocumentContextValue, pageId: string): string[] => {
   requirePage(context, pageId);
   const row = context.getDocumentSnapshot().pageRows.find((candidate) => candidate.includes(pageId));
@@ -180,6 +226,23 @@ const requireRow = (context: DocumentContextValue, pageId: string): string[] => 
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+/** Mirrors PageStack's minimumRowHeight: the same content floor the user's
+ * drag gesture enforces, derived from page types. (The UI additionally raises
+ * text/versions floors to their measured DOM content height, which has no
+ * model-space equivalent — those rows can still store less than they render.) */
+const rowMinHeight = (context: DocumentContextValue, row: string[]): number => {
+  const document = context.getDocumentSnapshot();
+  return Math.max(MIN_ROW_HEIGHT, ...row.map((pageId) => {
+    const page = document.pages[pageId];
+    if (!page) return MIN_ROW_HEIGHT;
+    if (page.type === "drawing") return MIN_DRAWING_HEIGHT;
+    const block = page.front.blocks[0];
+    if (block?.type === "image" || block?.type === "video") return MIN_MEDIA_HEIGHT;
+    if (block?.type === "variants") return MIN_VERSIONS_HEIGHT;
+    return MIN_ROW_HEIGHT;
+  }));
+};
 
 const sanitizeStrokes = (input: AgentStroke[]): DrawingStroke[] => {
   if (!Array.isArray(input) || input.length === 0) throw new AgentOpError("invalid", "Provide at least one stroke.");
@@ -303,9 +366,9 @@ export async function applyAgentOp(op: AgentOp, context: DocumentContextValue): 
     case "set_row_height": {
       requireRevision(op.baseRevision, context);
       const row = requireRow(context, op.pageId);
-      const height = clamp(Math.round(Number(op.height) || 0), MIN_ROW_HEIGHT, MAX_ROW_HEIGHT);
+      const height = clamp(Math.round(Number(op.height) || 0), rowMinHeight(context, row), MAX_ROW_HEIGHT);
       flushSync(() => context.setPageRowHeight(row, height));
-      return { revision: context.getRevision() };
+      return { revision: context.getRevision(), height };
     }
 
     case "set_row_widths": {
@@ -321,8 +384,12 @@ export async function applyAgentOp(op: AgentOp, context: DocumentContextValue): 
       }
       const sum = raw.reduce((total, fraction) => total + fraction, 0);
       const normalized = raw.map((fraction) => fraction / sum);
-      if (normalized.some((fraction) => fraction < 0.08)) {
-        throw new AgentOpError("invalid", "Each page needs at least 8% of the row width.");
+      // The same column floor the user's drag gesture enforces: at least 120px
+      // (or 12% of the row when that is larger), capped at an even two-way split.
+      const pageWidth = context.getDocumentSnapshot().settings.pageWidth;
+      const minFraction = Math.min(0.5, Math.max(120, pageWidth * 0.12) / pageWidth);
+      if (normalized.some((fraction) => fraction < minFraction)) {
+        throw new AgentOpError("invalid", `Each page needs at least ${(minFraction * 100).toFixed(1)}% of this row's width (the app's ${Math.round(Math.max(120, pageWidth * 0.12))}px column minimum).`);
       }
       flushSync(() => context.setRowWidthFractions(row, normalized));
       return { revision: context.getRevision() };
@@ -354,11 +421,91 @@ export async function applyAgentOp(op: AgentOp, context: DocumentContextValue): 
 
     case "edit_drawing": {
       requireRevision(op.baseRevision, context);
-      const page = requirePage(context, op.pageId);
-      if (page.type !== "drawing" || !page.drawing) throw new AgentOpError("invalid", `Page ${op.pageId} is not a drawing page.`);
+      const { drawing } = requireDrawing(context, op.pageId);
       const strokes = sanitizeStrokes(op.strokes);
-      const combined = op.mode === "append" ? [...page.drawing.strokes, ...strokes] : strokes;
-      flushSync(() => context.updatePageDrawing(op.pageId, { ...page.drawing!, strokes: combined }));
+      const combined = op.mode === "append" ? [...drawing.strokes, ...strokes] : strokes;
+      flushSync(() => context.updatePageDrawing(op.pageId, { ...drawing, strokes: combined }));
+      return { revision: context.getRevision() };
+    }
+
+    case "read_drawing": {
+      const { page, drawing } = requireDrawing(context, op.pageId);
+      const document = context.getDocumentSnapshot();
+      const row = document.pageRows.find((candidate) => candidate.includes(op.pageId));
+      const share = page.layoutWidthFraction ?? 1 / (row?.length ?? 1);
+      return {
+        revision: context.getRevision(),
+        drawing: {
+          height: drawing.height,
+          widthPx: Math.round(document.settings.pageWidth * share),
+          strokes: drawing.strokes.map((stroke) => ({
+            id: stroke.id,
+            tool: stroke.tool,
+            width: stroke.width,
+            opacity: round3(stroke.opacity),
+            points: stroke.points.map((point) => ({ x: round3(point.x), y: round3(point.y) }))
+          }))
+        }
+      };
+    }
+
+    case "delete_strokes": {
+      requireRevision(op.baseRevision, context);
+      const { drawing } = requireDrawing(context, op.pageId);
+      const ids = requireStrokeIds(op.strokeIds, drawing);
+      flushSync(() => context.updatePageDrawing(op.pageId, { ...drawing, strokes: drawing.strokes.filter((stroke) => !ids.has(stroke.id)) }));
+      return { revision: context.getRevision() };
+    }
+
+    case "modify_strokes": {
+      requireRevision(op.baseRevision, context);
+      const { drawing } = requireDrawing(context, op.pageId);
+      const ids = requireStrokeIds(op.strokeIds, drawing);
+      if (op.tool !== undefined && !["pen", "highlighter", "eraser"].includes(op.tool)) {
+        throw new AgentOpError("invalid", `Unknown tool "${op.tool}".`);
+      }
+      const dx = Number(op.dx) || 0;
+      const dy = Number(op.dy) || 0;
+      const scale = op.scale === undefined ? 1 : Number(op.scale);
+      if (!Number.isFinite(scale) || scale <= 0) throw new AgentOpError("invalid", "scale must be a positive number.");
+      // Scale about the given origin, defaulting to the selection's bounding-box
+      // center so "make it bigger" grows in place.
+      let originX = Number(op.originX);
+      let originY = Number(op.originY);
+      if (!Number.isFinite(originX) || !Number.isFinite(originY)) {
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        drawing.strokes.forEach((stroke) => {
+          if (!ids.has(stroke.id)) return;
+          stroke.points.forEach((point) => {
+            x0 = Math.min(x0, point.x);
+            y0 = Math.min(y0, point.y);
+            x1 = Math.max(x1, point.x);
+            y1 = Math.max(y1, point.y);
+          });
+        });
+        originX = Number.isFinite(x0) ? (x0 + x1) / 2 : 0.5;
+        originY = Number.isFinite(y0) ? (y0 + y1) / 2 : 0.5;
+      }
+      const moved = dx !== 0 || dy !== 0 || scale !== 1;
+      // Transformed ink may leave the visible canvas (clamped to a sane [-1, 2]
+      // band); it is hidden there, not deleted, mirroring how manual moves work.
+      const strokes = drawing.strokes.map((stroke) => {
+        if (!ids.has(stroke.id)) return stroke;
+        return {
+          ...stroke,
+          tool: op.tool ?? stroke.tool,
+          width: op.width !== undefined ? clamp(Number(op.width) || stroke.width, 1, 24) : stroke.width,
+          opacity: op.opacity !== undefined ? clamp(Number(op.opacity) || stroke.opacity, 0.05, 1) : stroke.opacity,
+          points: moved
+            ? stroke.points.map((point) => ({
+                ...point,
+                x: clamp(originX + (point.x - originX) * scale + dx, -1, 2),
+                y: clamp(originY + (point.y - originY) * scale + dy, -1, 2)
+              }))
+            : stroke.points
+        };
+      });
+      flushSync(() => context.updatePageDrawing(op.pageId, { ...drawing, strokes }));
       return { revision: context.getRevision() };
     }
 

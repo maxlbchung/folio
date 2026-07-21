@@ -1,14 +1,6 @@
 import { decodeInktile, encodeInktile, type LoadedInktile } from "./inktileArchive";
 import type { InktileDocument, RuntimeAssetMap } from "../document/types";
-import { AUTOSAVE_STORE, openInktileDb } from "./database";
-
-const KEY = "current";
-
-interface AutosaveRecord {
-  blob: Blob;
-  path: string | null;
-  recovery: boolean;
-}
+import { getStorage } from "./storage";
 
 export interface LoadedAutosave extends LoadedInktile {
   path: string | null;
@@ -21,43 +13,20 @@ export async function writeAutosave(
   path: string | null = null,
   recovery = true
 ): Promise<void> {
-  const db = await openInktileDb();
+  const storage = await getStorage();
   const blob = await encodeInktile(document, assets);
-  await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(AUTOSAVE_STORE, "readwrite");
-    transaction.objectStore(AUTOSAVE_STORE).put({ blob, path, recovery } satisfies AutosaveRecord, KEY);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-  db.close();
+  await storage.writeAutosave({ blob, path, recovery });
 }
 
 export async function readAutosave(): Promise<LoadedAutosave | null> {
-  const db = await openInktileDb();
-  const stored = await new Promise<Blob | AutosaveRecord | undefined>((resolve, reject) => {
-    const transaction = db.transaction(AUTOSAVE_STORE, "readonly");
-    const request = transaction.objectStore(AUTOSAVE_STORE).get(KEY);
-    request.onsuccess = () => resolve(request.result as Blob | AutosaveRecord | undefined);
-    request.onerror = () => reject(request.error);
-  });
-  db.close();
+  const storage = await getStorage();
+  const stored = await storage.readAutosave();
   if (!stored) return null;
-  const legacy = stored instanceof Blob;
-  const loaded = await decodeInktile(legacy ? stored : stored.blob);
-  return {
-    ...loaded,
-    path: legacy ? null : stored.path,
-    recovery: legacy || stored.recovery !== false
-  };
+  const loaded = await decodeInktile(stored.blob);
+  return { ...loaded, path: stored.path, recovery: stored.recovery };
 }
 
 export async function deleteAutosave(): Promise<void> {
-  const db = await openInktileDb();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(AUTOSAVE_STORE, "readwrite");
-    transaction.objectStore(AUTOSAVE_STORE).delete(KEY);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-  });
-  db.close();
+  const storage = await getStorage();
+  await storage.deleteAutosave();
 }

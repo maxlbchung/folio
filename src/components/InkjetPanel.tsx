@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lastAgentFocus, onAgentFocus } from "../agent/animations";
 import { applyAgentOp, AgentOpError } from "../agent/applyOp";
+import { FollowIcon } from "./icons";
 import { AgentClient, agentSupportedHere, type AgentConnectionState } from "../agent/connection";
 import type { AgentBackendId, AgentBackendStatus, BrokerToAppMessage } from "../agent/protocol";
 import { useDocument } from "../document/DocumentContext";
@@ -28,9 +30,12 @@ const PROVIDER_LABEL: Record<AgentBackendId, string> = {
 
 const PREFS_KEY = "inkjet-session";
 const WIDTH_KEY = "inkjet-panel-width";
+const CHAT_KEY_PREFIX = "inkjet-chat:";
 const MIN_PANEL_WIDTH = 280;
 const MAX_PANEL_WIDTH = 760;
 const MAX_COMPOSER_HEIGHT = 190;
+const MAX_STORED_ENTRIES = 200;
+const MAX_STORED_CHATS = 50;
 
 const readPrefs = (): Partial<SessionChoice> => {
   try {
@@ -40,6 +45,71 @@ const readPrefs = (): Partial<SessionChoice> => {
     // Fall through to defaults.
   }
   return {};
+};
+
+/** The per-document conversation store: the visible transcript plus the
+ * provider/model it runs on, so reopening the panel drops straight back into
+ * the chat. Its counterpart lives broker-side — the CLI resume ids persisted
+ * by agent/session-store.mjs — which is what lets the *model* remember the
+ * conversation; this store is what lets the *user* see it again. */
+interface StoredChat {
+  provider: AgentBackendId;
+  model: string;
+  updatedAt: number;
+  transcript: TranscriptEntry[];
+}
+
+const isTranscriptEntry = (value: unknown): value is TranscriptEntry => {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Partial<TranscriptEntry>;
+  return typeof entry.id === "string" && typeof entry.text === "string"
+    && (entry.role === "user" || entry.role === "agent" || entry.role === "info" || entry.role === "error");
+};
+
+const readStoredChat = (docId: string): StoredChat | null => {
+  try {
+    const raw = localStorage.getItem(CHAT_KEY_PREFIX + docId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredChat>;
+    if (!parsed || !PROVIDER_IDS.includes(parsed.provider as AgentBackendId)) return null;
+    return {
+      provider: parsed.provider as AgentBackendId,
+      model: typeof parsed.model === "string" ? parsed.model : "",
+      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
+      transcript: Array.isArray(parsed.transcript) ? parsed.transcript.filter(isTranscriptEntry) : []
+    };
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredChat = (docId: string, chat: Omit<StoredChat, "updatedAt" | "transcript"> & { transcript: TranscriptEntry[] }) => {
+  try {
+    const stored: StoredChat = { ...chat, transcript: chat.transcript.slice(-MAX_STORED_ENTRIES), updatedAt: Date.now() };
+    localStorage.setItem(CHAT_KEY_PREFIX + docId, JSON.stringify(stored));
+    // Growth guard: drop the longest-untouched documents' conversations.
+    const keys = Object.keys(localStorage).filter((key) => key.startsWith(CHAT_KEY_PREFIX));
+    if (keys.length > MAX_STORED_CHATS) {
+      const age = (key: string) => {
+        try {
+          return (JSON.parse(localStorage.getItem(key) ?? "") as Partial<StoredChat>).updatedAt ?? 0;
+        } catch {
+          return 0;
+        }
+      };
+      keys.sort((a, b) => age(b) - age(a)).slice(MAX_STORED_CHATS).forEach((key) => localStorage.removeItem(key));
+    }
+  } catch {
+    // Persistence is best-effort; the live conversation is unaffected.
+  }
+};
+
+const clearStoredChat = (docId: string) => {
+  try {
+    localStorage.removeItem(CHAT_KEY_PREFIX + docId);
+  } catch {
+    // Best-effort.
+  }
 };
 
 const clampWidth = (width: number) => Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
@@ -93,12 +163,16 @@ const readPanelWidth = (): number => {
 export function InkjetPanel() {
   const documentContext = useDocument();
   const { agentTurn, beginAgentTurn, getRevision, getDocumentSnapshot } = documentContext;
+  const docId = documentContext.document.id;
   const [open, setOpen] = useState(false);
   const [connection, setConnection] = useState<AgentConnectionState>("disconnected");
   const [startError, setStartError] = useState<string | null>(null);
   const [providers, setProviders] = useState<Record<AgentBackendId, AgentBackendStatus> | null>(null);
   const [view, setView] = useState<"setup" | "chat">("setup");
-  const [session, setSession] = useState<SessionChoice | null>(null);
+  // The session remembers which document it belongs to: the panel outlives
+  // document switches (toolbar New/Open swaps the document under it), and the
+  // docId pins persistence writes to the chat's own document.
+  const [session, setSession] = useState<(SessionChoice & { docId: string }) | null>(null);
   const [provider, setProvider] = useState<AgentBackendId | null>(null);
   const [model, setModel] = useState("");
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
@@ -108,6 +182,9 @@ export function InkjetPanel() {
   // joins `transcript`, so it is never persisted or scrolled back to.
   const [thinking, setThinking] = useState<{ promptId: string; text: string } | null>(null);
   const [prompt, setPrompt] = useState("");
+  // Follow mode: keep the viewport vertically centered on the tile the agent is
+  // working on. Any manual scroll gesture switches it back off.
+  const [follow, setFollow] = useState(false);
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
   const widthDragRef = useRef<{ startX: number; startWidth: number; zoom: number } | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -225,6 +302,45 @@ export function InkjetPanel() {
     if (open && !desktopOnly) startAgent();
   }, [open, desktopOnly, startAgent]);
 
+  // Conversations persist per document: opening the panel on a document with a
+  // stored chat drops straight back into it — across panel closes, document
+  // switches, and app restarts. The broker keeps the matching CLI resume ids
+  // on disk, so the next prompt continues the same conversation. Restored
+  // entries render instantly (marked typed), not as a replayed typewriter.
+  const restoredRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open || desktopOnly || restoredRef.current === docId) return;
+    restoredRef.current = docId;
+    const stored = readStoredChat(docId);
+    setThinking(null);
+    typedRef.current = new Set(stored ? stored.transcript.map((entry) => entry.id) : []);
+    setTranscript(stored ? stored.transcript : []);
+    setSession(stored ? { provider: stored.provider, model: stored.model, docId } : null);
+    setView(stored ? "chat" : "setup");
+    if (stored) {
+      setProvider(stored.provider);
+      setModel(stored.model);
+    }
+  }, [open, desktopOnly, docId]);
+
+  // Mirror the live conversation into the per-document store as it grows. The
+  // docId guard keeps the transient render right after a document switch (old
+  // transcript state, new document) from filing the chat under the wrong id.
+  useEffect(() => {
+    if (!session || session.docId !== docId) return;
+    writeStoredChat(docId, { provider: session.provider, model: session.model, transcript });
+  }, [docId, session, transcript]);
+
+  // A restored chat whose CLI has since vanished (uninstalled, signed out)
+  // falls back to the setup screen, where the provider list explains why.
+  useEffect(() => {
+    if (!providers || !session || turnRef.current) return;
+    if (!providers[session.provider]?.available) {
+      setSession(null);
+      setView("setup");
+    }
+  }, [providers, session]);
+
   // When provider availability arrives, seed the setup choices: restore the
   // remembered provider/model when still valid, otherwise the first available.
   useEffect(() => {
@@ -311,16 +427,26 @@ export function InkjetPanel() {
     } catch {
       // Preference is best-effort.
     }
-    // A session is a fresh conversation: drop any backend resume state.
-    clientRef.current?.send({ type: "reset", docId: getDocumentSnapshot().id });
-    setSession(choice);
+    // A session is a fresh conversation: drop any backend resume state. The
+    // per-document store follows along — the persistence effect overwrites it
+    // with this fresh session.
+    clientRef.current?.send({ type: "reset", docId });
+    setSession({ ...choice, docId });
     setTranscript([]);
+    typedRef.current = new Set();
     setThinking(null);
     setView("chat");
   };
 
   const endSession = () => {
     if (agentTurn) return;
+    // Exiting ends the conversation for real: with sessions now resuming
+    // automatically, this is the one gesture that discards the stored chat and
+    // the backends' resume state instead of picking it back up next open.
+    clientRef.current?.send({ type: "reset", docId });
+    clearStoredChat(docId);
+    setTranscript([]);
+    typedRef.current = new Set();
     setSession(null);
     setView("setup");
   };
@@ -352,6 +478,43 @@ export function InkjetPanel() {
     }
   };
 
+  // Follow mode: center the viewport (y only) on whatever the agent animates
+  // next, seeded with its current focus when toggled on mid-turn. Wheel input
+  // or a page-scrolling key anywhere outside the panel means the user took the
+  // wheel back — follow switches off instead of fighting them.
+  useEffect(() => {
+    if (!agentTurn || !follow) return;
+    const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const center = (element: HTMLElement) => {
+      if (!element.isConnected) return;
+      const rect = element.getBoundingClientRect();
+      const top = window.scrollY + rect.top + rect.height / 2 - window.innerHeight / 2;
+      window.scrollTo({ top: Math.max(0, top), behavior: reduced ? "auto" : "smooth" });
+    };
+    const seed = lastAgentFocus();
+    if (seed) center(seed);
+    const offFocus = onAgentFocus(center);
+    const disable = () => setFollow(false);
+    // Gestures inside the panel scroll the chat, not the document — only
+    // document-scrolling input takes follow off.
+    const insidePanel = (event: Event) =>
+      event.target instanceof HTMLElement && Boolean(event.target.closest(".inkjet-panel"));
+    const onWheel = (event: WheelEvent) => {
+      if (!insidePanel(event)) disable();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (insidePanel(event)) return;
+      if (["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "].includes(event.key)) disable();
+    };
+    window.addEventListener("wheel", onWheel, { passive: true });
+    window.addEventListener("keydown", onKey);
+    return () => {
+      offFocus();
+      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [agentTurn, follow]);
+
   const availableProviders = providers ? PROVIDER_IDS.filter((id) => providers[id]?.available) : null;
   const modelOptions = provider && providers ? providers[provider]?.models ?? [] : [];
   const sessionModelLabel = session && providers
@@ -361,10 +524,25 @@ export function InkjetPanel() {
 
   return (
     <>
+      {/* Full-viewport lock while a turn runs: everything except the Inkjet
+          panel, its toggle, and the Stop indicator sits under this scrim (they
+          stack above it), so "the document is read-only right now" is visible
+          and every other surface is uninteractable. Wheel scrolling still
+          reaches the document scroller, so the user can follow the agent. */}
+      {agentTurn && <div className="inkjet-lock-scrim" aria-hidden="true" />}
       {agentTurn && (
         <div className="inkjet-turn-indicator" role="status">
           <span className="inkjet-turn-indicator__pulse" aria-hidden="true" />
           Inkjet is printing…
+          <button
+            className={`inkjet-turn-indicator__follow ${follow ? "is-active" : ""}`}
+            title={follow ? "Following Inkjet — scroll to stop" : "Follow Inkjet's edits"}
+            aria-label="Follow Inkjet's edits"
+            aria-pressed={follow}
+            onClick={() => setFollow((value) => !value)}
+          >
+            <FollowIcon size={13} />
+          </button>
           <button onClick={stopTurn}>Stop</button>
         </div>
       )}
@@ -397,7 +575,7 @@ export function InkjetPanel() {
               </span>
             )}
             {inChat && (
-              <button className="inkjet-panel__new" onClick={endSession} disabled={agentTurn}>New session</button>
+              <button className="inkjet-panel__new" onClick={endSession} disabled={agentTurn}>Exit session</button>
             )}
           </header>
 

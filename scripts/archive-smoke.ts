@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createDocument, createPage, normalizeDocumentPages, uuid } from "../src/document/factories";
 import { decodeInktile, encodeInktile } from "../src/persistence/inktileArchive";
-import { INKTILE_DB_VERSION, LIBRARY_INDEX_STORE } from "../src/persistence/database";
+import { INKTILE_DB_VERSION, LIBRARY_INDEX_STORE, TAGS_STORE } from "../src/persistence/database";
 import { resolveSaveAction } from "../src/persistence/fileSystem";
 import type { AssetMetadata, RuntimeAssetMap } from "../src/document/types";
 
@@ -12,8 +12,9 @@ assert.equal(resolveSaveAction(true, null), "library", "native Save without an e
 assert.equal(resolveSaveAction(true, null, true), "save-as", "native Save As is the only path-choosing action");
 assert.equal(resolveSaveAction(false, null), "library", "browser Save updates the local library without creating a file");
 assert.equal(resolveSaveAction(false, null, true), "download", "browser export is the only download-creating action");
-assert.equal(INKTILE_DB_VERSION, 3, "library payload/index separation uses database schema version 3");
+assert.equal(INKTILE_DB_VERSION, 4, "tag definitions store arrives with database schema version 4");
 assert.equal(LIBRARY_INDEX_STORE, "library-index", "library metadata has a dedicated lightweight store");
+assert.equal(TAGS_STORE, "tags", "tag definitions have a dedicated store");
 const firstPage = createPage();
 const secondPage = createPage("drawing");
 firstPage.layoutHeight = 420;

@@ -29,7 +29,7 @@
 
 Inktile is a modular document editor, where you arrange cells with various content types. It functions as a freeform document canvas enabling more creative layouts and designs, while still retaining the classic document shape for more traditional document work.
 
-Inkjet, Inktile's agent-runner, allows you to use your existing coding agent CLIs through the application, exposing the open document to them as MCP tools. This means zero setup on Inktile's side: no API keys, no ports, no MCP wiring.
+Inkjet is Inktile's built-in meta harness: it unifies your installed coding CLIs under one protocol and gives each its own system prompt, tool surface, sandbox, and effect-mediation. It lets those agents write, draw on, and arrange tiles in your projects with no setup necessary.
 
 ## Features
 

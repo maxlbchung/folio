@@ -27,6 +27,12 @@ export const AlignBottomIcon = (props: IconProps) => <Icon {...props}><path d="M
 export const RemoveFormatIcon = (props: IconProps) => <Icon {...props}><path d="m4 20 16-16M8 5h10M13 5l-4 12M6 17h7"/></Icon>;
 export const BulletListIcon = (props: IconProps) => <Icon {...props}><path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></Icon>;
 export const NumberedListIcon = (props: IconProps) => <Icon {...props}><path d="M10 6h11M10 12h11M10 18h11M4 10h2M4 6h1v4M6 18H4c0-1 2-1.6 2-3 0-.9-1-1.2-2-.6"/></Icon>;
+export const ChecklistIcon = (props: IconProps) => <Icon {...props}><rect x="3" y="4" width="6" height="6" rx="1.5"/><path d="m4.8 7 1.4 1.4L8.6 6M12 7h9M12 17h9"/><rect x="3" y="14" width="6" height="6" rx="1.5"/></Icon>;
+export const TableIcon = (props: IconProps) => <Icon {...props}><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9.3h18M9.7 9.3V20M15.4 9.3V20"/></Icon>;
+export const MathIcon = (props: IconProps) => <Icon {...props}><path d="M18 5h-7l-4 14-2.5-5H3M13 12l6 7M19 12l-6 7"/></Icon>;
+export const LinkIcon = (props: IconProps) => <Icon {...props}><path d="M10.5 13.5a4.4 4.4 0 0 0 6.2.3l2.6-2.6a4.4 4.4 0 0 0-6.2-6.2l-1.5 1.5M13.5 10.5a4.4 4.4 0 0 0-6.2-.3l-2.6 2.6a4.4 4.4 0 0 0 6.2 6.2l1.5-1.5"/></Icon>;
+export const OpenExternalIcon = (props: IconProps) => <Icon {...props}><path d="M13 5h6v6M19 5l-8 8M10 6H5v13h13v-5"/></Icon>;
+export const DividerIcon = (props: IconProps) => <Icon {...props}><path d="M3 12h18"/><path d="M7 6h10M7 18h10" opacity=".4"/></Icon>;
 export const SaveIcon = (props: IconProps) => <Icon {...props}><path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-8h8v8" /></Icon>;
 export const ExportIcon = (props: IconProps) => <Icon {...props}><path d="M12 3v12M7 10l5 5 5-5M4 20h16" /></Icon>;
 export const FolderIcon = (props: IconProps) => <Icon {...props}><path d="M3 6h7l2 2h9v11H3z" /></Icon>;
@@ -43,6 +49,7 @@ export const ArrowUpIcon = (props: IconProps) => <Icon {...props}><path d="m7 10
 export const ArrowDownIcon = (props: IconProps) => <Icon {...props}><path d="m7 14 5 5 5-5M12 19V5" /></Icon>;
 export const SettingsIcon = (props: IconProps) => <Icon {...props}><circle cx="12" cy="12" r="3"/><path d="M19 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.1h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L3.8 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H2.5v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L3.8 7l2.8-2.8.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6v-.1h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.4 7l-.1.1A1.7 1.7 0 0 0 19 9a1.7 1.7 0 0 0 1.6 1h.1v4h-.1a1.7 1.7 0 0 0-1.6 1Z"/></Icon>;
 export const CloseIcon = (props: IconProps) => <Icon {...props}><path d="m6 6 12 12M18 6 6 18" /></Icon>;
+export const ExitIcon = (props: IconProps) => <Icon {...props}><path d="M9 4H4v16h5M15 8l4 4-4 4M19 12H9" /></Icon>;
 export const TextIcon = (props: IconProps) => <Icon {...props}><path d="M5 5h14M12 5v14M8 19h8" /></Icon>;
 export const UndoIcon = (props: IconProps) => <Icon {...props}><path d="M9 7 4 12l5 5M5 12h8a6 6 0 0 1 6 6" /></Icon>;
 export const RedoIcon = (props: IconProps) => <Icon {...props}><path d="m15 7 5 5-5 5M19 12h-8a6 6 0 0 0-6 6" /></Icon>;
@@ -53,12 +60,18 @@ export const ChevronUp = (props: IconProps) => <Icon {...props}><path d="m18 15-
 export const ChevronDown = (props: IconProps) => <Icon {...props}><path d="m6 9 6 6 6-6" /></Icon>;
 export const MoreIcon = (props: IconProps) => <Icon {...props}><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></Icon>;
 export const PenIcon = (props: IconProps) => <Icon {...props}><path d="m4 20 4.5-1 10-10-3.5-3.5-10 10zM13.8 6.7l3.5 3.5" /></Icon>;
+export const FollowIcon = (props: IconProps) => <Icon {...props}><circle cx="12" cy="12" r="3.5" /><path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22" /></Icon>;
 export const HighlighterIcon = (props: IconProps) => <Icon {...props}><path d="m4 20 5-1 9.5-9.5-4-4L5 15zM12.5 7.5l4 4M3 21h10" /></Icon>;
 export const EraserIcon = (props: IconProps) => <Icon {...props}><path d="m7 18-3-3 9-10 6 6-7 7zM9 9l6 6M7 18h12" /></Icon>;
 export const FlipIcon = (props: IconProps) => <Icon {...props}><path d="M4 7h11a5 5 0 0 1 5 5v1M8 3 4 7l4 4M20 17H9a5 5 0 0 1-5-5v-1M16 21l4-4-4-4" /></Icon>;
+export const TagIcon = (props: IconProps) => <Icon {...props}><path d="M3 3h8.6L21 12.4a1.4 1.4 0 0 1 0 2L14.4 21a1.4 1.4 0 0 1-2 0L3 11.6z" /><circle cx="7.6" cy="7.6" r="1.4" fill="currentColor" stroke="none" /></Icon>;
 export const PinIcon = (props: IconProps) => <Icon {...props}><path d="M9 3h6l-1 6 3 3.5V14H7v-1.5L10 9zM12 14v7" /></Icon>;
 export const UnpinIcon = (props: IconProps) => <Icon {...props}><path d="M9 3h6l-1 6 3 3.5V14H7v-1.5L10 9zM12 14v7M4 4l16 16" /></Icon>;
 // Card-size icons: fewer, larger tiles as the size grows.
 export const GridSmallIcon = (props: IconProps) => <Icon {...props}>{[4, 10, 16].flatMap((y) => [4, 10, 16].map((x) => <rect key={`${x}-${y}`} x={x} y={y} width="4" height="4" rx="1" fill="currentColor" stroke="none" />))}</Icon>;
 export const GridMediumIcon = (props: IconProps) => <Icon {...props}>{[5, 13].flatMap((y) => [5, 13].map((x) => <rect key={`${x}-${y}`} x={x} y={y} width="6" height="6" rx="1.2" fill="currentColor" stroke="none" />))}</Icon>;
 export const GridLargeIcon = (props: IconProps) => <Icon {...props}><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none" /></Icon>;
+// Handle-visibility icons: filled = always shown, outline = faded until hover, dashed = hidden until hover.
+export const HandlesFullIcon = (props: IconProps) => <Icon {...props}><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none" /></Icon>;
+export const HandlesGhostIcon = (props: IconProps) => <Icon {...props}><rect x="5" y="5" width="14" height="14" rx="2" /></Icon>;
+export const HandlesHiddenIcon = (props: IconProps) => <Icon {...props}><rect x="5" y="5" width="14" height="14" rx="2" strokeDasharray="2.6 3.2" /></Icon>;

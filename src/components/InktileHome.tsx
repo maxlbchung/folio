@@ -6,13 +6,16 @@ import {
   listLibraryInktiles,
   renameLibraryInktile,
   setLibraryInktilePinned,
+  setLibraryInktileTags,
   sortLibraryInktiles,
   type LibraryEntry,
   type LibrarySort,
   type SortDirection
 } from "../persistence/library";
-import type { AppPreferences, CardSize, ThemePreference, UiScale } from "../persistence/preferences";
+import { TAG_COLORS, createTag, deleteTag, listTags, updateTag, type InktileTag } from "../persistence/tags";
+import type { AppPreferences, CardSize, HandleVisibility, ThemePreference, UiScale } from "../persistence/preferences";
 import { HomeContextMenu, type HomeMenuState } from "./HomeContextMenu";
+import { TagDialog } from "./TagDialog";
 import { RowScrollbar } from "./RowScrollbar";
 import {
   ArrowDownIcon,
@@ -20,15 +23,20 @@ import {
   CloseIcon,
   DuplicateIcon,
   EditIcon,
+  ExitIcon,
   FileIcon,
   FolderIcon,
   GridLargeIcon,
   GridMediumIcon,
   GridSmallIcon,
+  HandlesFullIcon,
+  HandlesGhostIcon,
+  HandlesHiddenIcon,
   PinIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
+  TagIcon,
   TrashIcon,
   UnpinIcon
 } from "./icons";
@@ -40,6 +48,11 @@ import type {
   ReactNode,
   SVGProps
 } from "react";
+
+/** Which tag dialog is open: creating a tag for an entry, or editing an existing definition. */
+type TagDialogState =
+  | { mode: "create"; entry: LibraryEntry }
+  | { mode: "edit"; tag: InktileTag };
 
 interface InktileHomeProps {
   refreshToken: number;
@@ -62,6 +75,17 @@ const THEME_OPTIONS: Array<{ value: ThemePreference; label: string }> = [
   { value: "system", label: "System" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" }
+];
+
+const HANDLE_OPTIONS: Array<{
+  value: HandleVisibility;
+  label: string;
+  hint: string;
+  Icon: ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
+}> = [
+  { value: "full", label: "Full", hint: "Tile handles stay fully visible", Icon: HandlesFullIcon },
+  { value: "ghost", label: "Ghost", hint: "Tile handles stay faded until you hover a tile or handle", Icon: HandlesGhostIcon },
+  { value: "hidden", label: "Hidden", hint: "Tile handles appear only when you hover a tile or handle", Icon: HandlesHiddenIcon }
 ];
 
 const UI_SCALE_OPTIONS: Array<{ value: UiScale; label: string }> = [
@@ -129,8 +153,13 @@ const highlightMatches = (text: string, query: string): ReactNode => {
   return nodes;
 };
 
+/** Dots shown on a card before collapsing the rest into a "+N" overflow marker. */
+const MAX_CARD_TAG_DOTS = 4;
+
 interface InktileCardProps {
   entry: LibraryEntry;
+  /** The entry's tags resolved to definitions (unknown ids already filtered out). */
+  tags: InktileTag[];
   frequency?: number;
   query: string;
   sort: LibrarySort;
@@ -143,10 +172,11 @@ interface InktileCardProps {
   onTogglePin: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onTagClick: (tag: InktileTag) => void;
 }
 
 function InktileCard({
-  entry, frequency, query, sort, editing, busy, onOpen, onEdit, onCancelEdit, onRename, onTogglePin, onDuplicate, onDelete
+  entry, tags, frequency, query, sort, editing, busy, onOpen, onEdit, onCancelEdit, onRename, onTogglePin, onDuplicate, onDelete, onTagClick
 }: InktileCardProps) {
   const [draftTitle, setDraftTitle] = useState(entry.title);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -162,9 +192,31 @@ function InktileCard({
   const sortDate = sort === "createdAt" ? entry.createdAt : sort === "modifiedAt" ? entry.modifiedAt : entry.lastOpenedAt;
   const dateLabel = sort === "createdAt" ? "Created" : sort === "modifiedAt" ? "Edited" : "Opened";
   const excerpt = excerptForQuery(entry, query);
+  // Inset the title so it never runs under the tag dots pinned to the card's top-right corner.
+  const shownDots = Math.min(tags.length, MAX_CARD_TAG_DOTS);
+  const tagClearance = tags.length ? shownDots * 13 + (tags.length > MAX_CARD_TAG_DOTS ? 18 : 0) + 4 : 0;
 
   return (
     <article className="inktile-card" data-inktile-id={entry.id}>
+      {!editing && tags.length > 0 && (
+        <div className="inktile-card__tags">
+          {tags.slice(0, MAX_CARD_TAG_DOTS).map((tag) => (
+            <button
+              key={tag.id}
+              className="inktile-card__tag-dot"
+              style={{ background: tag.color }}
+              onClick={() => onTagClick(tag)}
+              title={`Tagged “${tag.name}” — click to see every inktile with it`}
+              aria-label={`Show inktiles tagged ${tag.name}`}
+            />
+          ))}
+          {tags.length > MAX_CARD_TAG_DOTS && (
+            <span className="inktile-card__tag-more" title={tags.slice(MAX_CARD_TAG_DOTS).map((tag) => tag.name).join(", ")}>
+              +{tags.length - MAX_CARD_TAG_DOTS}
+            </span>
+          )}
+        </div>
+      )}
       {editing ? (
         <form className="inktile-card__rename" onSubmit={(event) => { event.preventDefault(); onRename(draftTitle); }}>
           <label className="sr-only" htmlFor={`rename-${entry.id}`}>Inktile title</label>
@@ -183,7 +235,7 @@ function InktileCard({
         </form>
       ) : (
         <button className="inktile-card__open" onClick={onOpen} disabled={busy} aria-label={`Open ${entry.title}`}>
-          <h2>{highlightMatches(entry.title, query)}</h2>
+          <h2 style={tagClearance ? { paddingRight: tagClearance } : undefined}>{highlightMatches(entry.title, query)}</h2>
           <p>{excerpt ? highlightMatches(excerpt, query) : "Empty inktile — open it to add the first tile."}</p>
         </button>
       )}
@@ -208,6 +260,9 @@ export function InktileHome({
   refreshToken, preferences, onCreate, onOpen, onImport, onOpenFile, onPreferencesChange, onStatus
 }: InktileHomeProps) {
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
+  const [tags, setTags] = useState<InktileTag[]>([]);
+  const [activeTagIds, setActiveTagIds] = useState<string[]>([]);
+  const [tagDialog, setTagDialog] = useState<TagDialogState | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -228,9 +283,12 @@ export function InktileHome({
   const [dragging, setDragging] = useState(false);
 
   const refresh = async () => setEntries(await listLibraryInktiles());
+  const refreshTags = async () => setTags(await listTags());
 
   useEffect(() => {
-    void refresh().catch(() => onStatus("Library could not be loaded")).finally(() => setLoading(false));
+    void Promise.all([refresh(), refreshTags()])
+      .catch(() => onStatus("Library could not be loaded"))
+      .finally(() => setLoading(false));
   }, [refreshToken]);
 
   useEffect(() => {
@@ -252,6 +310,12 @@ export function InktileHome({
     else await window.document.documentElement.requestFullscreen();
   };
 
+  // Desktop only: request a window close, same path as the titlebar X (App's guard applies).
+  const exitApp = async () => {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().close();
+  };
+
   useEffect(() => {
     if (!settingsOpen) return;
     settingsCloseRef.current?.focus();
@@ -270,18 +334,35 @@ export function InktileHome({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [settingsOpen]);
 
-  const sortedEntries = useMemo(() => sortLibraryInktiles(entries, sort, direction), [entries, sort, direction]);
+  const tagById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
+  const entryTags = (entry: LibraryEntry): InktileTag[] =>
+    (entry.tags ?? []).map((id) => tagById.get(id)).filter((tag): tag is InktileTag => Boolean(tag));
+  // Active tag filters narrow every view (grids and search alike); several tags combine as AND.
+  const visibleEntries = useMemo(
+    () => activeTagIds.length ? entries.filter((entry) => activeTagIds.every((id) => entry.tags?.includes(id))) : entries,
+    [entries, activeTagIds]
+  );
+  const sortedEntries = useMemo(() => sortLibraryInktiles(visibleEntries, sort, direction), [visibleEntries, sort, direction]);
   const pinnedEntries = useMemo(() => sortedEntries.filter((entry) => entry.pinned), [sortedEntries]);
   const unpinnedEntries = useMemo(() => sortedEntries.filter((entry) => !entry.pinned), [sortedEntries]);
   const searchResults = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     if (!normalized) return [];
-    const matches = entries
+    const matches = visibleEntries
       .map((entry) => ({ ...entry, frequency: countTextMatches(entry.plainText, query) }))
-      .filter((entry) => entry.title.toLocaleLowerCase().includes(normalized) || entry.frequency > 0);
+      .filter((entry) =>
+        entry.title.toLocaleLowerCase().includes(normalized) ||
+        entry.frequency > 0 ||
+        (entry.tags ?? []).some((id) => tagById.get(id)?.name.toLocaleLowerCase().includes(normalized)));
     return sortLibraryInktiles(matches, sort, direction) as Array<LibraryEntry & { frequency: number }>;
-  }, [entries, query, sort, direction]);
+  }, [visibleEntries, query, sort, direction, tagById]);
   const hasQuery = Boolean(query.trim());
+  const hasTagFilter = activeTagIds.length > 0;
+  const tagFilterLabel = activeTagIds
+    .map((id) => tagById.get(id)?.name)
+    .filter(Boolean)
+    .map((name) => `“${name}”`)
+    .join(" and ");
   const sortLabel = SORT_OPTIONS.find((option) => option.value === sort)?.label ?? "Sorted";
   const orderLabel = `${sortLabel} · ${direction === "ascending" ? "Ascending" : "Descending"}`;
 
@@ -354,6 +435,57 @@ export function InktileHome({
       onStatus(error instanceof Error ? error.message : "Inktile could not be deleted");
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const toggleEntryTag = async (entry: LibraryEntry, tag: InktileTag, apply: boolean) => {
+    // setLibraryInktileTags mutates the shared cache entry, so compute the target list up front.
+    const current = entry.tags ?? [];
+    const next = apply ? [...current, tag.id] : current.filter((id) => id !== tag.id);
+    try {
+      await setLibraryInktileTags(entry.id, next);
+      await refresh();
+      // Keep the open context menu in sync so its tag list reflects the change immediately.
+      setMenu((state) => state?.entry?.id === entry.id ? { ...state, entry: { ...entry, tags: next } } : state);
+      onStatus(apply ? `Tagged “${entry.title}” with “${tag.name}”` : `Removed “${tag.name}” from “${entry.title}”`);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Tags could not be updated");
+    }
+  };
+
+  const saveTagDialog = async (name: string, color: string) => {
+    if (!tagDialog) return;
+    try {
+      if (tagDialog.mode === "create") {
+        const created = await createTag(name, color);
+        const latest = entries.find((entry) => entry.id === tagDialog.entry.id) ?? tagDialog.entry;
+        await setLibraryInktileTags(latest.id, [...(latest.tags ?? []), created.id]);
+        await refreshTags();
+        await refresh();
+        onStatus(`Tagged “${latest.title}” with “${created.name}”`);
+      } else {
+        await updateTag(tagDialog.tag.id, { name, color });
+        await refreshTags();
+        onStatus(`Updated tag “${name.trim() || tagDialog.tag.name}”`);
+      }
+      setTagDialog(null);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Tag could not be saved");
+    }
+  };
+
+  const deleteTagDefinition = async () => {
+    if (tagDialog?.mode !== "edit") return;
+    const target = tagDialog.tag;
+    try {
+      await deleteTag(target.id);
+      await refreshTags();
+      await refresh();
+      setActiveTagIds((ids) => ids.filter((id) => id !== target.id));
+      setTagDialog(null);
+      onStatus(`Deleted tag “${target.name}”`);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Tag could not be deleted");
     }
   };
 
@@ -456,6 +588,11 @@ export function InktileHome({
   const onOpenFileRef = useRef(onOpenFile);
   useEffect(() => { onOpenFileRef.current = onOpenFile; });
 
+  // With an empty library there is no "Open .inktile" card to aim at, so the whole home
+  // screen becomes the drop target. The mount-once drag effects below read this ref.
+  const libraryEmptyRef = useRef(false);
+  useEffect(() => { libraryEmptyRef.current = !loading && entries.length === 0; });
+
   // In the Tauri shell the webview intercepts OS file drops, so HTML5 drop events never carry
   // files; listen to the native drag-drop stream and hit-test against the Open card instead.
   useEffect(() => {
@@ -474,12 +611,12 @@ export function InktileHome({
       getCurrentWebview().onDragDropEvent((event) => {
         if (event.payload.type === "enter" || event.payload.type === "over") {
           setDragging(true);
-          setDropActive(overOpenCard(event.payload.position));
+          setDropActive(libraryEmptyRef.current || overOpenCard(event.payload.position));
         } else if (event.payload.type === "drop") {
           setDragging(false);
           setDropActive(false);
           const path = event.payload.paths.find((item) => /\.inktile$/i.test(item)) ?? event.payload.paths[0];
-          if (path && overOpenCard(event.payload.position)) void onOpenFileRef.current(path);
+          if (path && (libraryEmptyRef.current || overOpenCard(event.payload.position))) void onOpenFileRef.current(path);
         } else {
           setDragging(false);
           setDropActive(false);
@@ -517,7 +654,15 @@ export function InktileHome({
       if (depth === 0) setDragging(false);
     };
     const onEnd = (event: DragEvent) => {
-      if (event.type === "drop") event.preventDefault();
+      if (event.type === "drop") {
+        event.preventDefault();
+        // Empty library: the whole screen accepts the file (no Open card exists to aim at).
+        if (libraryEmptyRef.current) {
+          const files = Array.from(event.dataTransfer?.files ?? []);
+          const file = files.find((item) => /\.inktile$/i.test(item.name)) ?? files[0];
+          if (file) void onOpenFileRef.current(file);
+        }
+      }
       depth = 0;
       setDragging(false);
     };
@@ -539,6 +684,7 @@ export function InktileHome({
     <InktileCard
       key={entry.id}
       entry={entry}
+      tags={entryTags(entry)}
       frequency={frequency}
       query={query}
       sort={sort}
@@ -551,6 +697,7 @@ export function InktileHome({
       onTogglePin={() => void togglePinEntry(entry)}
       onDuplicate={() => void duplicateEntry(entry)}
       onDelete={() => setDeleteTarget(entry)}
+      onTagClick={(tag) => { setQuery(""); setActiveTagIds([tag.id]); }}
     />
   );
 
@@ -569,6 +716,12 @@ export function InktileHome({
             aria-haspopup="dialog"
             aria-expanded={settingsOpen}
           ><SettingsIcon size={15} />Settings</button>
+          {Boolean(window.__TAURI_INTERNALS__) && (
+            <button
+              className="library-button library-button--secondary"
+              onClick={() => void exitApp()}
+            ><ExitIcon size={15} />Exit</button>
+          )}
         </div>
       </header>
 
@@ -618,20 +771,54 @@ export function InktileHome({
         </div>
       </section>
 
+      {tags.length > 0 && (
+        <section className="library-tagbar" aria-label="Filter by tag">
+          <TagIcon size={13} aria-hidden="true" />
+          {tags.map((tag) => {
+            const active = activeTagIds.includes(tag.id);
+            const count = entries.filter((entry) => entry.tags?.includes(tag.id)).length;
+            return (
+              <button
+                key={tag.id}
+                className={`library-tag-chip${active ? " is-active" : ""}`}
+                onClick={() => setActiveTagIds((ids) => active ? ids.filter((id) => id !== tag.id) : [...ids, tag.id])}
+                onContextMenu={(event) => {
+                  // Keep the document-level handler from opening the home menu on top of this.
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setTagDialog({ mode: "edit", tag });
+                }}
+                aria-pressed={active}
+                title={`${active ? "Stop filtering by" : "Show inktiles tagged"} “${tag.name}” · right-click to edit`}
+              >
+                <span className="library-tag-chip__dot" style={{ background: tag.color }} aria-hidden="true" />
+                {tag.name}
+                <span className="library-tag-chip__count">{count}</span>
+              </button>
+            );
+          })}
+          {hasTagFilter && (
+            <button className="library-tagbar__clear" onClick={() => setActiveTagIds([])}>Clear</button>
+          )}
+        </section>
+      )}
+
       {loading ? (
         <div className="library-state" role="status">Opening your library…</div>
       ) : !entries.length ? (
-        <section className="library-empty">
+        <section className={`library-empty${dragging ? " is-drop-target" : ""}`}>
           <div className="library-empty__pages" aria-hidden="true"><span /><span /><span /></div>
           <p className="library-eyebrow">The shelf is empty</p>
-          <h2>Start with a blank inktile.</h2>
-          <p>New inktiles begin empty. Add text, versions, drawings, or media when you open one.</p>
+          <h2>{dragging ? "Drop it anywhere." : "Start with a blank inktile."}</h2>
+          <p>{dragging ? "Release to open the .inktile file here." : "New inktiles begin empty. Add text, versions, drawings, or media when you open one."}</p>
           <button className="library-button library-button--primary" onClick={onCreate}><FileIcon size={15} />Create your first inktile</button>
           <button className="library-button library-button--secondary" onClick={() => void onImport()}><FolderIcon size={15} />Open .inktile</button>
         </section>
       ) : hasQuery ? (
         <div className="library-results" aria-live="polite">
-          <p className="library-result-summary">{searchResults.length} {searchResults.length === 1 ? "inktile" : "inktiles"} found for “{query.trim()}”</p>
+          <p className="library-result-summary">
+            {searchResults.length} {searchResults.length === 1 ? "inktile" : "inktiles"} found for “{query.trim()}”{hasTagFilter ? <> tagged {tagFilterLabel}</> : null}
+          </p>
           {searchResults.length > 0 ? (
             <section className="library-result-group" aria-label="Matches">
               <div className={`inktile-grid inktile-grid--${preferences.cardSize}`}>{searchResults.map((entry) => renderCard(entry, entry.frequency || undefined))}</div>
@@ -641,6 +828,23 @@ export function InktileHome({
               <SearchIcon size={22} />
               <strong>No matching words</strong>
               <span>Try another title, word, or phrase.</span>
+            </div>
+          )}
+        </div>
+      ) : hasTagFilter ? (
+        <div className="library-results" aria-live="polite">
+          <p className="library-result-summary">
+            {sortedEntries.length} {sortedEntries.length === 1 ? "inktile" : "inktiles"} tagged {tagFilterLabel}
+          </p>
+          {sortedEntries.length > 0 ? (
+            <section className="library-result-group" aria-label="Tagged inktiles">
+              <div className={`inktile-grid inktile-grid--${preferences.cardSize}`}>{sortedEntries.map((entry) => renderCard(entry))}</div>
+            </section>
+          ) : (
+            <div className="library-state">
+              <TagIcon size={22} />
+              <strong>Nothing carries all of these tags</strong>
+              <span>Remove a tag filter to widen the view.</span>
             </div>
           )}
         </div>
@@ -720,6 +924,25 @@ export function InktileHome({
                 </div>
               </div>
 
+              <div className="library-setting-row" role="radiogroup" aria-labelledby="handles-label">
+                <span className="library-setting-label" id="handles-label">Handle visibility</span>
+                <div className="library-theme-options">
+                  {HANDLE_OPTIONS.map((option) => (
+                    <label key={option.value} className={preferences.handleVisibility === option.value ? "is-selected" : ""} title={option.hint}>
+                      <input
+                        type="radio"
+                        name="handle-visibility"
+                        value={option.value}
+                        checked={preferences.handleVisibility === option.value}
+                        onChange={() => onPreferencesChange({ handleVisibility: option.value })}
+                      />
+                      <option.Icon size={15} aria-hidden="true" />
+                      {option.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               <label className="library-setting-row library-setting-row--inline">
                 <span>UI scale</span>
                 <select
@@ -780,6 +1003,7 @@ export function InktileHome({
       {menu && (
         <HomeContextMenu
           state={menu}
+          tags={tags}
           onClose={() => setMenu(null)}
           onCreate={onCreate}
           onImport={() => void onImport()}
@@ -789,6 +1013,19 @@ export function InktileHome({
           onTogglePinEntry={(entry) => void togglePinEntry(entry)}
           onDuplicateEntry={(entry) => void duplicateEntry(entry)}
           onDeleteEntry={(entry) => setDeleteTarget(entry)}
+          onToggleEntryTag={(entry, tag, apply) => void toggleEntryTag(entry, tag, apply)}
+          onCreateTagForEntry={(entry) => setTagDialog({ mode: "create", entry })}
+        />
+      )}
+
+      {tagDialog && (
+        <TagDialog
+          tag={tagDialog.mode === "edit" ? tagDialog.tag : undefined}
+          defaultColor={TAG_COLORS.find((swatch) => !tags.some((tag) => tag.color === swatch)) ?? TAG_COLORS[tags.length % TAG_COLORS.length]}
+          usageCount={tagDialog.mode === "edit" ? entries.filter((entry) => entry.tags?.includes(tagDialog.tag.id)).length : 0}
+          onSave={(name, color) => void saveTagDialog(name, color)}
+          onDelete={tagDialog.mode === "edit" ? () => void deleteTagDefinition() : undefined}
+          onCancel={() => setTagDialog(null)}
         />
       )}
     </main>

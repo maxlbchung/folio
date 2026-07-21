@@ -1,9 +1,11 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useDocument } from "../document/DocumentContext";
+import { useDocument, type InsertPosition } from "../document/DocumentContext";
+import { createMediaBlock, createVariantBlock } from "../document/factories";
+import { detectMediaPageType } from "../document/mediaTypes";
 import { useTileSelection, type EdgeSelection } from "./TileSelectionContext";
 import type { ImageBlock, InktileDocument, InktilePage, VideoBlock, AudioBlock } from "../document/types";
-import { CopyIcon, DuplicateIcon, FlipIcon, PasteIcon, PlusIcon, RedoIcon, TrashIcon, UndoIcon } from "./icons";
+import { CopyIcon, DuplicateIcon, FileIcon, FlipIcon, PasteIcon, PenIcon, RedoIcon, TextIcon, TrashIcon, UndoIcon } from "./icons";
 
 interface EditorContextMenuProps {
   onStatus: (message: string) => void;
@@ -192,6 +194,9 @@ const tileStats = (page: InktilePage, document: InktileDocument, mediaInfo: Reco
   ];
 };
 
+/** Every insertable tile type; "media" routes through the file picker first. */
+type TileKind = "text" | "versions" | "drawing" | "media";
+
 interface EditorMenuViewProps {
   state: EditorMenuState;
   page: InktilePage | null;
@@ -207,21 +212,19 @@ interface EditorMenuViewProps {
   canUndo: boolean;
   canRedo: boolean;
   onClose: () => void;
-  onAddAfter: () => void;
-  onAddAtEdge: () => void;
+  onAdd: (kind: TileKind) => void;
   onDuplicate: () => void;
   onCopy: () => void;
   onPaste: () => void;
   onToggleSide: () => void;
   onDelete: () => void;
-  onNewTile: () => void;
   onUndo: () => void;
   onRedo: () => void;
 }
 
 function EditorMenuView({
   state, page, stats, pageIndex, pageCount, selectionCount, clipboardCount, edgeCanAdd, edgeCanPaste, canUndo, canRedo, onClose,
-  onAddAfter, onAddAtEdge, onDuplicate, onCopy, onPaste, onToggleSide, onDelete, onNewTile, onUndo, onRedo
+  onAdd, onDuplicate, onCopy, onPaste, onToggleSide, onDelete, onUndo, onRedo
 }: EditorMenuViewProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: state.x, top: state.y });
@@ -262,6 +265,25 @@ function EditorMenuView({
   // Run an action, then always dismiss the menu.
   const run = (action: () => void) => () => { onClose(); action(); };
 
+  // One entry per tile type, everywhere a menu can insert (tile, edge, background) —
+  // the insertion spot comes from the menu context, the type from the item.
+  const addItems = (disabled = false) => (
+    <>
+      <button className="home-menu__item" role="menuitem" onClick={run(() => onAdd("text"))} disabled={disabled}>
+        <TextIcon size={15} />Add text
+      </button>
+      <button className="home-menu__item" role="menuitem" onClick={run(() => onAdd("versions"))} disabled={disabled}>
+        <CopyIcon size={15} />Add versions
+      </button>
+      <button className="home-menu__item" role="menuitem" onClick={run(() => onAdd("drawing"))} disabled={disabled}>
+        <PenIcon size={15} />Add drawing
+      </button>
+      <button className="home-menu__item" role="menuitem" onClick={run(() => onAdd("media"))} disabled={disabled}>
+        <FileIcon size={15} />Add media…
+      </button>
+    </>
+  );
+
   return createPortal(
     <div
       ref={menuRef}
@@ -273,9 +295,8 @@ function EditorMenuView({
     >
       {state.edge !== null ? (
         <>
-          <button className="home-menu__item" role="menuitem" onClick={run(onAddAtEdge)} disabled={!edgeCanAdd}>
-            <PlusIcon size={15} />Add tile here
-          </button>
+          {addItems(!edgeCanAdd)}
+          <div className="home-menu__sep" role="separator" />
           <button className="home-menu__item" role="menuitem" onClick={run(onPaste)} disabled={!edgeCanPaste}>
             <PasteIcon size={15} />Paste here
           </button>
@@ -319,9 +340,8 @@ function EditorMenuView({
               ))}
             </dl>
           </div>
-          <button className="home-menu__item" role="menuitem" onClick={run(onAddAfter)}>
-            <PlusIcon size={15} />Add tile below
-          </button>
+          {addItems()}
+          <div className="home-menu__sep" role="separator" />
           <button className="home-menu__item" role="menuitem" onClick={run(onDuplicate)}>
             <DuplicateIcon size={15} />Duplicate tile
           </button>
@@ -341,9 +361,8 @@ function EditorMenuView({
         </>
       ) : (
         <>
-          <button className="home-menu__item" role="menuitem" onClick={run(onNewTile)}>
-            <PlusIcon size={15} />New tile
-          </button>
+          {addItems()}
+          <div className="home-menu__sep" role="separator" />
           <button className="home-menu__item" role="menuitem" onClick={run(onPaste)} disabled={!clipboardCount}>
             <PasteIcon size={15} />Paste tiles
           </button>
@@ -361,14 +380,24 @@ function EditorMenuView({
   );
 }
 
+/** Where a menu-initiated insert should land — captured when the item was clicked, since
+ * the media path resolves asynchronously after the menu (and its state) are gone. */
+interface InsertTarget {
+  edge: EdgeSelection | null;
+  afterPageId: string | null;
+}
+
 export function EditorContextMenu({ onStatus }: EditorContextMenuProps) {
-  const { document, assets, addPage, addPageAt, undo, redo, canUndo, canRedo } = useDocument();
+  const { document, assets, addPage, addPageAt, addBlockPage, addBlockPageAt, addAsset, undo, redo, canUndo, canRedo } = useDocument();
   const {
     selectedIds, isSelected, selectOnly, selectEdge, clipboardCount,
     copySelected, pasteClipboard, duplicateSelected, deleteSelected, flipSelected
   } = useTileSelection();
   const [menu, setMenu] = useState<EditorMenuState | null>(null);
   const [mediaInfo, setMediaInfo] = useState<Record<string, MediaInfo>>({});
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const mediaInput = useRef<HTMLInputElement>(null);
+  const pendingMediaTarget = useRef<InsertTarget | null>(null);
   const requestedRef = useRef<Set<string>>(new Set());
 
   // Listen at the document level so the whole editor — canvas, margins, toolbar — opens
@@ -450,50 +479,116 @@ export function EditorContextMenu({ onStatus }: EditorContextMenuProps) {
     return () => { cancelled = true; };
   }, [mediaAssetId, mediaKind, assets]);
 
-  if (!menu) return null;
+  const edgePosition = (edge: EdgeSelection): InsertPosition =>
+    edge.kind === "column" ? { rowIndex: edge.rowIndex, columnIndex: edge.index } : { rowIndex: edge.index };
+
+  /** Land a freshly created page at the captured target: exactly at an edge (which then
+   * becomes the selection), after the hit tile, or at the document end. */
+  const reportInserted = (target: InsertTarget, newId: string | null) => {
+    if (!newId) {
+      onStatus("A row holds at most four tiles");
+      return;
+    }
+    if (target.edge) selectOnly(newId);
+    onStatus("Tile added");
+  };
+
+  const insertTile = (kind: Exclude<TileKind, "media">, target: InsertTarget) => {
+    if (kind === "versions") {
+      reportInserted(target, target.edge
+        ? addBlockPageAt(createVariantBlock(), edgePosition(target.edge))
+        : addBlockPage(createVariantBlock(), target.afterPageId ?? undefined));
+      return;
+    }
+    const pageType = kind === "drawing" ? "drawing" : "standard";
+    reportInserted(target, target.edge
+      ? addPageAt(edgePosition(target.edge), pageType)
+      : addPage(target.afterPageId ?? undefined, pageType));
+  };
+
+  const insertMediaFile = async (file: File | undefined) => {
+    const target = pendingMediaTarget.current;
+    pendingMediaTarget.current = null;
+    if (!file || !target) return;
+    const type = detectMediaPageType(file.type, file.name);
+    if (!type) {
+      setMediaError(`“${file.name}” is not a supported media format yet. Choose an image, video, or audio file.`);
+      return;
+    }
+    try {
+      const assetId = await addAsset(file);
+      const block = createMediaBlock(type, assetId, file.name);
+      reportInserted(target, target.edge
+        ? addBlockPageAt(block, edgePosition(target.edge))
+        : addBlockPage(block, target.afterPageId ?? undefined));
+    } catch (error) {
+      setMediaError(error instanceof Error ? error.message : "The media file could not be added.");
+    }
+  };
+
+  const handleAdd = (target: InsertTarget) => (kind: TileKind) => {
+    if (kind === "media") {
+      // Remember where to insert; the picker resolves after the menu is gone.
+      pendingMediaTarget.current = target;
+      mediaInput.current?.click();
+      return;
+    }
+    insertTile(kind, target);
+  };
 
   const pageIndex = pageId ? document.pageOrder.indexOf(pageId) : -1;
   const close = () => setMenu(null);
   // Vertical edges insert into an existing row, so their menu items respect the
   // four-per-row maximum; horizontal edges always take new rows.
-  const edgeRow = menu.edge?.kind === "column" ? document.pageRows[menu.edge.rowIndex] : null;
-  const edgeCanAdd = menu.edge?.kind !== "column" || Boolean(edgeRow && edgeRow.length < 4);
-  const edgeCanPaste = clipboardCount > 0 && (menu.edge?.kind !== "column" || Boolean(edgeRow && edgeRow.length + clipboardCount <= 4));
+  const edgeRow = menu?.edge?.kind === "column" ? document.pageRows[menu.edge.rowIndex] : null;
+  const edgeCanAdd = menu?.edge?.kind !== "column" || Boolean(edgeRow && edgeRow.length < 4);
+  const edgeCanPaste = clipboardCount > 0 && (menu?.edge?.kind !== "column" || Boolean(edgeRow && edgeRow.length + clipboardCount <= 4));
 
   return (
-    <EditorMenuView
-      state={menu}
-      page={page}
-      stats={page ? tileStats(page, document, mediaInfo) : []}
-      pageIndex={pageIndex}
-      pageCount={document.pageOrder.length}
-      selectionCount={selectedIds.length}
-      clipboardCount={clipboardCount}
-      edgeCanAdd={edgeCanAdd}
-      edgeCanPaste={edgeCanPaste}
-      canUndo={canUndo}
-      canRedo={canRedo}
-      onClose={close}
-      onAddAfter={() => { if (pageId) { addPage(pageId, "standard"); onStatus("Tile added"); } }}
-      onAddAtEdge={() => {
-        const edge = menu.edge;
-        if (!edge) return;
-        // Insert exactly at the edge; the new tile becomes the selection.
-        const newId = edge.kind === "column"
-          ? addPageAt({ rowIndex: edge.rowIndex, columnIndex: edge.index }, "standard")
-          : addPageAt({ rowIndex: edge.index }, "standard");
-        if (!newId) { onStatus("A row holds at most four tiles"); return; }
-        selectOnly(newId);
-        onStatus("Tile added");
-      }}
-      onDuplicate={duplicateSelected}
-      onCopy={copySelected}
-      onPaste={pasteClipboard}
-      onToggleSide={flipSelected}
-      onDelete={deleteSelected}
-      onNewTile={() => { addPage(undefined, "standard"); onStatus("Tile added"); }}
-      onUndo={undo}
-      onRedo={redo}
-    />
+    <>
+      {menu && (
+        <EditorMenuView
+          state={menu}
+          page={page}
+          stats={page ? tileStats(page, document, mediaInfo) : []}
+          pageIndex={pageIndex}
+          pageCount={document.pageOrder.length}
+          selectionCount={selectedIds.length}
+          clipboardCount={clipboardCount}
+          edgeCanAdd={edgeCanAdd}
+          edgeCanPaste={edgeCanPaste}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onClose={close}
+          onAdd={handleAdd({ edge: menu.edge, afterPageId: menu.pageId })}
+          onDuplicate={duplicateSelected}
+          onCopy={copySelected}
+          onPaste={pasteClipboard}
+          onToggleSide={flipSelected}
+          onDelete={deleteSelected}
+          onUndo={undo}
+          onRedo={redo}
+        />
+      )}
+      <input
+        ref={mediaInput}
+        hidden
+        type="file"
+        aria-label="Media file for the new tile"
+        onChange={(event) => {
+          const input = event.currentTarget;
+          void insertMediaFile(input.files?.[0]).finally(() => { input.value = ""; });
+        }}
+      />
+      {mediaError && (
+        <div className="media-error" role="alertdialog" aria-modal="true" aria-labelledby="menu-media-error-title">
+          <div className="media-error__panel">
+            <strong id="menu-media-error-title">Unsupported file</strong>
+            <p>{mediaError}</p>
+            <button autoFocus onClick={() => setMediaError(null)}>Close</button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

@@ -11,7 +11,7 @@
     "check:docs": "node scripts/check-docs.mjs",
     "check": "npm run check:docs && npm run build && npm run test:archive && npm run check:agent && node --check scripts/ui-smoke.mjs",
     "test:archive": "tsx scripts/archive-smoke.ts",
-    "test:ui": "esbuild src/main.tsx --bundle --format=iife --platform=browser --target=chrome120 --jsx=automatic --outfile=dist-smoke-current/app.js && node scripts/ui-smoke.mjs",
+    "test:ui": "esbuild src/main.tsx --bundle --format=iife --platform=browser --target=chrome120 --jsx=automatic --loader:.woff2=dataurl --loader:.woff=dataurl --loader:.ttf=dataurl --outfile=dist-smoke-current/app.js && node scripts/ui-smoke.mjs",
     "test": "npm run build && npm run test:archive && npm run test:ui",
     "check:agent": "tsc -p agent",
     "hooks:install": "node scripts/install-hooks.mjs",
@@ -22,6 +22,7 @@
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
     "jszip": "^3.10.1",
+    "katex": "^0.18.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },

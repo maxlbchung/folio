@@ -5,7 +5,8 @@ import { useRef } from "react";
 import type { CSSProperties } from "react";
 import { BlockRenderer } from "./BlockRenderer";
 import { DrawingCanvas } from "./DrawingCanvas";
-import { FlipIcon, GripIcon, NoteIcon, TrashIcon } from "./icons";
+import { ElementScrollbar } from "./ElementScrollbar";
+import { FlipIcon, GripIcon, TrashIcon } from "./icons";
 
 interface Props {
   page: InktilePage;
@@ -32,8 +33,11 @@ export function PageView({ page, index, columnIndex, rowSize, widthBefore, right
   const dragGestureRef = useRef<{ startX: number; startY: number; moved: boolean } | null>(null);
   const side = page.activeSide;
   const showNotes = side === "back";
-  // Both faces are always rendered (stacked in one grid cell) so the card is sized to
-  // whichever side is taller and never resizes when flipping between page and notes.
+  // The notes scroller: notes never affect the card's height (the front face alone sizes
+  // it); overflowing notes scroll inside the card via the shared ElementScrollbar overlay.
+  const notesScrollerRef = useRef<HTMLDivElement | null>(null);
+  // Both faces are always rendered, but only the FRONT face is in flow: the card is sized
+  // by the front side alone and never resizes when flipping between page and notes.
   // Page type is a property of the FRONT face; the back face is always plain notes text.
   const frontPrimary = page.front.blocks[0];
   const drawingFront = page.type === "drawing";
@@ -43,6 +47,8 @@ export function PageView({ page, index, columnIndex, rowSize, widthBefore, right
   // measurement (PageStack.tsx) can target versions pages specifically.
   const variantsFront = frontPrimary?.type === "variants";
   const frontCompact = frontPrimary?.type === "text" || frontPrimary?.type === "variants" || frontPrimary?.type === "audio";
+  // An audio front is a single short player bar; it centers vertically in the tile.
+  const audioFront = frontPrimary?.type === "audio";
   const verticalAlign = page.verticalAlign ?? "top";
   const compactPadding = Math.max(8, Math.round(document.settings.contentPadding / 2));
   const frontFills = drawingFront || mediaFront;
@@ -59,7 +65,7 @@ export function PageView({ page, index, columnIndex, rowSize, widthBefore, right
   const externalRailStyles = {
     width: "100%",
     "--inktile-cell-start": `calc(var(--inktile-row-width) * ${widthBefore})`,
-    "--inktile-left-handle": `calc(-1 * var(--inktile-cell-start) - ${(rowSize - columnIndex) * 30 + 8}px)`,
+    "--inktile-left-handle": `calc(-1 * var(--inktile-cell-start) - ${(rowSize - columnIndex) * 35 + 5}px)`,
     "--inktile-right-rail-full": `calc(var(--inktile-row-width) - var(--inktile-cell-start) + ${rightRailOffset + 8}px)`
   } as CSSProperties;
 
@@ -120,7 +126,8 @@ export function PageView({ page, index, columnIndex, rowSize, widthBefore, right
           <span>{index + 1}</span>
         </div>
         <button className="page-handle__notes" onClick={() => togglePageSide(page.id)} title={showNotes ? "Return to tile" : "Show notes"} aria-label={showNotes ? `Return to tile ${index + 1}` : `Show notes for tile ${index + 1}`}>
-          {showNotes ? <FlipIcon size={14}/> : <NoteIcon size={14}/>}
+          {/* One steady glyph both ways: the action is always "flip", whichever side shows. */}
+          <FlipIcon size={14}/>
         </button>
         <button className="page-handle__delete" onClick={() => deletePage(page.id)} title={`Delete tile ${index + 1}`} aria-label={`Delete tile ${index + 1}`}>
           <TrashIcon size={14} />
@@ -129,7 +136,7 @@ export function PageView({ page, index, columnIndex, rowSize, widthBefore, right
 
       <div className={`page-card ${drawingFront ? "page-card--drawing" : ""} ${mediaFront ? "page-card--media" : ""} ${variantsFront ? "page-card--variants" : ""} ${showNotes ? "is-flipped" : ""}`} style={{ width: "100%" }}>
         <div
-          className={`page-face page-face--front page-face--align-${verticalAlign} ${drawingFront ? "page-face--drawing" : ""} ${mediaFront ? "page-face--media" : ""} ${showNotes ? "is-inactive" : "is-active"}`}
+          className={`page-face page-face--front page-face--align-${verticalAlign} ${drawingFront ? "page-face--drawing" : ""} ${mediaFront ? "page-face--media" : ""} ${audioFront ? "page-face--audio" : ""} ${showNotes ? "is-inactive" : "is-active"}`}
           style={{ padding: frontPadding }}
           aria-hidden={showNotes}
           inert={showNotes}
@@ -150,9 +157,15 @@ export function PageView({ page, index, columnIndex, rowSize, widthBefore, right
           inert={!showNotes}
         >
           <div className="page-side-label">Notes</div>
-          <div className="page-blocks">
+          <div className="page-blocks" ref={notesScrollerRef}>
             {(page.back?.blocks ?? []).map((block) => <BlockRenderer key={block.id} pageId={page.id} side="back" block={block} />)}
           </div>
+          <ElementScrollbar
+            scrollerRef={notesScrollerRef}
+            watch={page.back}
+            label={`Scroll notes for tile ${index + 1}`}
+            className="notes-scrollbar"
+          />
         </div>
       </div>
     </article>

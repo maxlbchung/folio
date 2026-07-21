@@ -68,6 +68,8 @@ Image and video sizing follows the page's shared `layoutHeight`. The current nor
 
 Text and variants persist HTML. Do not insert placeholder or generated title content into those fields.
 
+Rich structures persist inside that HTML with a small fixed vocabulary: checklists as `<ul class="checklist">` whose items carry `data-checked="true|false"`; tables as `<table class="text-table">` with plain `tr`/`th`/`td`; links as plain `<a href>` restricted to http/https/mailto (other schemes are stripped on edit); and math fields as empty `<span class="math-field" data-tex="…" data-display="true|false" contenteditable="false">` elements. A math field's KaTeX rendering happens at display time in a shadow root and must never be written into persisted HTML — the TeX source is the persisted form.
+
 Drawing points are normalized coordinates. Stroke tools are pen, highlighter, or eraser, with width and opacity stored per stroke.
 
 ## Assets
@@ -94,7 +96,7 @@ Assets are deduplicated by content hash when added. Decoding tolerates a missing
 
 ## Local library catalog
 
-The home-page library is application data, not part of the version-1 manifest. IndexedDB stores a complete `.inktile` blob for each stable document ID in the `library` payload store. A separate `library-index` store holds derived title, date, last-opened, page-count, preview, plain-text, and optional native-path fields, plus the user-set `pinned` flag, allowing Home and last-opened updates to avoid reading or rewriting archive payloads. Duplicating a library entry writes a fresh payload and index record under a new document ID with no native path. Payload records also store a working snapshot made from a structured-cloned manifest and raw asset blobs. The working snapshot avoids ZIP decoding on repeated library navigation and never enters `manifest.json`. Database version 3 currently migrates version-2 payload metadata into the lightweight index, but future schema changes do not need to retain that migration behavior.
+The home-page library is application data, not part of the version-1 manifest. IndexedDB stores a complete `.inktile` blob for each stable document ID in the `library` payload store. A separate `library-index` store holds derived title, date, last-opened, page-count, preview, plain-text, and optional native-path fields, plus the user-set `pinned` flag and `tags` id list, allowing Home and last-opened updates to avoid reading or rewriting archive payloads. Duplicating a library entry writes a fresh payload and index record under a new document ID with no native path. Payload records also store a working snapshot made from a structured-cloned manifest and raw asset blobs. The working snapshot avoids ZIP decoding on repeated library navigation and never enters `manifest.json`. Database version 4 adds a `tags` store of user-defined tag definitions (`id`, `name`, `color`, `createdAt`); library records reference tags by id, and tags never enter the `.inktile` archive. Version 3's migration of version-2 payload metadata into the lightweight index is still applied on upgrade, but future schema changes do not need to retain that migration behavior.
 
 Opening an external `.inktile` decodes it through the normal archive path and adds a snapshot to the library. Deleting a library entry deletes only that IndexedDB record; a separately saved native file is left untouched. The current startup path also copies the single autosave record into the library when present.
 

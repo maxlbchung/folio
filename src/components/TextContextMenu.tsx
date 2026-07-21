@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CutIcon, DuplicateIcon, PasteIcon, SelectAllIcon } from "./icons";
+import { useDocument } from "../document/DocumentContext";
+import { editTable, insertPastedLink, notifyInput, type TableEdit } from "../utils/richText";
+import { CutIcon, DuplicateIcon, MinusIcon, PasteIcon, PlusIcon, SelectAllIcon, TrashIcon } from "./icons";
 
 /** Where the menu was summoned and the editable field it acts on. */
 interface TextMenuState {
@@ -9,6 +11,9 @@ interface TextMenuState {
   field: HTMLElement;
   canCopy: boolean;
   canEdit: boolean;
+  /** Set when the menu was summoned over a table cell in a rich-text tile: unlocks the
+   * structural row/column items below. */
+  cell: HTMLTableCellElement | null;
 }
 
 /** Keep the menu this many pixels clear of the viewport edges when it would overflow. */
@@ -23,6 +28,7 @@ interface TextMenuViewProps {
 }
 
 function TextMenuView({ state, onClose }: TextMenuViewProps) {
+  const { checkpoint } = useDocument();
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: state.x, top: state.y });
 
@@ -58,7 +64,20 @@ function TextMenuView({ state, onClose }: TextMenuViewProps) {
     };
   }, [onClose]);
 
-  const { field, canCopy, canEdit } = state;
+  const { field, canCopy, canEdit, cell } = state;
+
+  // Structural table edits work on the live DOM; the input event routes the result
+  // through the owning tile's normal serialize-and-commit path. Each edit checkpoints
+  // first so it undoes as one discrete step (checkpoint dedupes if the tile's own
+  // session checkpoint fires for the same gesture).
+  const runTableEdit = (edit: TableEdit) => {
+    if (cell) {
+      checkpoint();
+      editTable(cell, edit);
+      notifyInput(field);
+    }
+    onClose();
+  };
 
   const copy = () => { field.focus(); window.document.execCommand("copy"); onClose(); };
   const cut = () => { field.focus(); window.document.execCommand("cut"); onClose(); };
@@ -69,7 +88,10 @@ function TextMenuView({ state, onClose }: TextMenuViewProps) {
       if (navigator.clipboard?.readText) {
         const text = await navigator.clipboard.readText();
         field.focus();
-        window.document.execCommand("insertText", false, text);
+        // A single pasted URL autolinks in the rich-text tiles, same as Ctrl+V there.
+        if (!(field.matches(".text-block, .variant-editor") && insertPastedLink(text, field, checkpoint))) {
+          window.document.execCommand("insertText", false, text);
+        }
       } else {
         window.document.execCommand("paste");
       }
@@ -103,6 +125,32 @@ function TextMenuView({ state, onClose }: TextMenuViewProps) {
       <button className="home-menu__item" role="menuitem" onClick={selectAll}>
         <SelectAllIcon size={15} />Select all
       </button>
+      {cell && canEdit && (
+        <>
+          <div className="home-menu__sep" role="separator" />
+          <button className="home-menu__item" role="menuitem" onClick={() => runTableEdit("row-above")}>
+            <PlusIcon size={15} />Insert row above
+          </button>
+          <button className="home-menu__item" role="menuitem" onClick={() => runTableEdit("row-below")}>
+            <PlusIcon size={15} />Insert row below
+          </button>
+          <button className="home-menu__item" role="menuitem" onClick={() => runTableEdit("column-left")}>
+            <PlusIcon size={15} />Insert column left
+          </button>
+          <button className="home-menu__item" role="menuitem" onClick={() => runTableEdit("column-right")}>
+            <PlusIcon size={15} />Insert column right
+          </button>
+          <button className="home-menu__item" role="menuitem" onClick={() => runTableEdit("delete-row")}>
+            <MinusIcon size={15} />Delete row
+          </button>
+          <button className="home-menu__item" role="menuitem" onClick={() => runTableEdit("delete-column")}>
+            <MinusIcon size={15} />Delete column
+          </button>
+          <button className="home-menu__item" role="menuitem" onClick={() => runTableEdit("delete-table")}>
+            <TrashIcon size={15} />Delete table
+          </button>
+        </>
+      )}
     </div>,
     window.document.body
   );
@@ -127,6 +175,7 @@ export function TextContextMenu() {
       event.preventDefault();
       let canCopy = false;
       let canEdit = true;
+      let cell: HTMLTableCellElement | null = null;
       if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
         canCopy = field.selectionStart !== null && field.selectionStart !== field.selectionEnd;
         canEdit = !field.readOnly && !field.disabled;
@@ -134,8 +183,10 @@ export function TextContextMenu() {
         const selection = window.getSelection();
         canCopy = Boolean(selection) && !selection!.isCollapsed && field.contains(selection!.anchorNode);
         canEdit = field.isContentEditable;
+        cell = target.closest("td, th");
+        if (cell && !field.contains(cell)) cell = null;
       }
-      setMenu({ x: event.clientX, y: event.clientY, field, canCopy, canEdit });
+      setMenu({ x: event.clientX, y: event.clientY, field, canCopy, canEdit, cell });
     };
     window.document.addEventListener("contextmenu", handleContextMenu);
     return () => window.document.removeEventListener("contextmenu", handleContextMenu);

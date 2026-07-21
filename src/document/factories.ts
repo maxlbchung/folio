@@ -53,6 +53,15 @@ export const createVariantBlock = (): VariantGroupBlock => ({
   ]
 });
 
+/** The media block for a freshly imported asset — one shape shared by every media
+ * insertion surface (the add-tile menu and the editor context menu). */
+export const createMediaBlock = (type: "image" | "video" | "audio", assetId: string, filename: string): Block =>
+  type === "image"
+    ? { id: uuid(), type, assetId, height: 420, fit: "contain", alt: filename }
+    : type === "video"
+      ? { id: uuid(), type, assetId, height: 420, fit: "contain", controls: true }
+      : { id: uuid(), type, assetId, size: "compact" };
+
 export const createPage = (type: PageType = "standard", block?: Block): InktilePage => {
   const page: InktilePage = {
     id: uuid(),
